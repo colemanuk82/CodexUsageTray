@@ -1,0 +1,7 @@
+bin/
+obj/
+recovered/
+*.user
+*.suo
+*.userprefs
+.vs/
