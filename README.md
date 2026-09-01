@@ -19,6 +19,14 @@ A lightweight Windows system-tray monitor for Codex limits, usage history, model
 - Local history and rate caching.
 - No account credentials or usage history are uploaded by this application.
 
+### Tray icon
+
+The tray icon shows the weekly bar above the five-hour bar:
+
+![Codex Usage Tray icon showing weekly and five-hour bars](docs/tray-icon.png)
+
+Both bars turn red when the reset monitor reports a high possibility of a reset (above 70%).
+
 ## Interface
 
 ### Codex limits
