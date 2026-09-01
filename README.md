@@ -19,6 +19,16 @@ A lightweight Windows system-tray monitor for Codex limits, usage history, model
 - Local history and rate caching.
 - No account credentials or usage history are uploaded by this application.
 
+## Interface
+
+### Codex limits
+
+![Codex limits popout](docs/limits-popout.png)
+
+### Codex usage
+
+![Codex usage popout](docs/usage-popout.png)
+
 ## Integrations
 
 ### Codex usage service
