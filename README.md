@@ -29,6 +29,8 @@ Both bars turn red when the reset monitor reports a high possibility of a reset 
 
 ## Interface
 
+The screenshots below show the tray-only Release interface; the popouts do not add separate taskbar entries.
+
 ### Codex limits
 
 ![Codex limits popout](docs/limits-popout.png)
