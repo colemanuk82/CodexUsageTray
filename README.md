@@ -115,7 +115,7 @@ All usage processing and history storage are local to the Windows machine. The a
 
 ## Installation
 
-Download `CodexUsageTray-v2.0.4-Setup.exe` from the [GitHub release](https://github.com/colemanuk82/CodexUsageTray/releases/tag/v2.0.4) and run it. The installer installs the current Release build for the signed-in Windows user under `%LOCALAPPDATA%\\CodexUsageTray`, replaces an older running copy, and launches the tray icon.
+Download `CodexUsageTray-v2.0.5-Setup.exe` from the [GitHub release](https://github.com/colemanuk82/CodexUsageTray/releases/tag/v2.0.5) and run it. The installer installs the current Release build for the signed-in Windows user under `%LOCALAPPDATA%\\CodexUsageTray`, replaces an older running copy, and launches the tray icon.
 
 ## Build
 
