@@ -1,6 +1,28 @@
 # Codex Usage Tray
 
-A lightweight Windows system-tray monitor for Codex limits, usage history, model activity, and estimated API cost.
+> A quiet Windows companion for seeing Codex limits, usage, model activity, and estimated API cost at a glance.
+
+[![Latest release](https://img.shields.io/github/v/release/colemanuk82/CodexUsageTray?label=latest%20release)](https://github.com/colemanuk82/CodexUsageTray/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+
+Codex Usage Tray lives in the Windows status area and keeps the useful numbers close without opening a browser or adding another taskbar window. Click the status icon for live limit meters, or switch to the usage view for local history, model breakdowns, and cost estimates.
+
+## See it in action
+
+<p align="center">
+  <img src="docs/limits-popout.png" alt="Codex limits popout" width="420">
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/usage-popout.png" alt="Codex usage popout" width="420">
+</p>
+
+<p align="center"><em>Codex limits and Codex usage — compact, themeable popouts anchored to the status icon.</em></p>
+
+## Why use it?
+
+- Know how much five-hour and weekly capacity remains before starting a large task.
+- See whether a reset may be approaching, with historical reset markers and countdowns.
+- Understand which models are consuming tokens and what the activity may cost.
+- Keep everything local: the app reads local Codex data and caches only the information needed for the display.
 
 ## Features
 
@@ -30,15 +52,7 @@ Both bars turn red when the reset monitor reports a high possibility of a reset 
 
 ## Interface
 
-The screenshots below show the tray-only Release interface; the popouts do not add separate taskbar entries.
-
-### Codex limits
-
-![Codex limits popout](docs/limits-popout.png)
-
-### Codex usage
-
-![Codex usage popout](docs/usage-popout.png)
+The screenshots above show the tray-only Release interface; the popouts do not add separate taskbar entries. The limits view focuses on live capacity and reset timing, while the usage view turns local session history into readable trends, model totals, and cost estimates.
 
 ### Theme gallery
 
@@ -115,7 +129,7 @@ All usage processing and history storage are local to the Windows machine. The a
 
 ## Installation
 
-Download `CodexUsageTray-v2.0.5-Setup.exe` from the [GitHub release](https://github.com/colemanuk82/CodexUsageTray/releases/tag/v2.0.5) and run it. The installer installs the current Release build for the signed-in Windows user under `%LOCALAPPDATA%\\CodexUsageTray`, replaces an older running copy, and launches the tray icon.
+Download `CodexUsageTray-v2.0.7-Setup.exe` from the [latest GitHub release](https://github.com/colemanuk82/CodexUsageTray/releases/latest) and run it. The installer installs the current Release build for the signed-in Windows user under `%LOCALAPPDATA%\\CodexUsageTray`, replaces an older running copy, and launches the tray icon.
 
 ## Build
 
