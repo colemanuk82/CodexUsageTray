@@ -15,7 +15,7 @@ A lightweight Windows system-tray monitor for Codex limits, usage history, model
 - Predicted API cost by model and estimated total cost.
 - Automatic refresh at a selectable 1-minute or 5-minute interval.
 - Popout switcher between Codex limits and Codex usage.
-- Theme presets: Default, AMOLED, Dracula, Nord, Solarized Dark, and Light.
+- Theme presets: Default, AMOLED, Dracula, Nord, Solarized Dark, Light, and translucent Glass.
 - Start with Windows option.
 - Local history and rate caching.
 - No account credentials or usage history are uploaded by this application.
@@ -39,6 +39,22 @@ The screenshots below show the tray-only Release interface; the popouts do not a
 ### Codex usage
 
 ![Codex usage popout](docs/usage-popout.png)
+
+## Themes
+
+Themes are selected from the tray icon’s right-click menu and apply to both popouts:
+
+- Default — the original black interface.
+- AMOLED — pure-black surfaces with bright OLED-friendly accents.
+- Dracula — purple-led accents with pink and green highlights.
+- Nord — cool blue-gray surfaces and soft Nordic accents.
+- Solarized Dark — the classic teal, blue, and gold palette.
+- Light — bright surfaces with high-contrast dark text.
+- Glass — translucent dark-blue popouts with soft blue borders.
+
+## Project
+
+[View the public GitHub repository](https://github.com/colemanuk82/CodexUsageTray)
 
 ## Integrations
 

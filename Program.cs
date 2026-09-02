@@ -29,32 +29,36 @@ internal static class ThemeManager
     [
         Default,
         new("AMOLED", Color.Black, Color.FromArgb(3, 8, 10), Color.White, Color.FromArgb(180, 220, 230), Color.FromArgb(0, 190, 255), Color.FromArgb(0, 255, 120), Color.FromArgb(255, 185, 0), Color.FromArgb(35, 30, 0), Color.FromArgb(255, 220, 60)),
-        new("Dracula", Color.FromArgb(40, 42, 54), Color.FromArgb(68, 71, 90), Color.FromArgb(248, 248, 242), Color.FromArgb(189, 187, 205), Color.FromArgb(139, 233, 253), Color.FromArgb(80, 250, 123), Color.FromArgb(255, 184, 108), Color.FromArgb(75, 55, 25), Color.FromArgb(255, 184, 108)),
+        new("Dracula", Color.FromArgb(40, 42, 54), Color.FromArgb(68, 71, 90), Color.FromArgb(248, 248, 242), Color.FromArgb(213, 208, 230), Color.FromArgb(189, 147, 249), Color.FromArgb(80, 250, 123), Color.FromArgb(255, 121, 198), Color.FromArgb(65, 45, 85), Color.FromArgb(189, 147, 249)),
         new("Nord", Color.FromArgb(46, 52, 64), Color.FromArgb(59, 66, 82), Color.FromArgb(236, 239, 244), Color.FromArgb(216, 222, 233), Color.FromArgb(136, 192, 208), Color.FromArgb(163, 190, 140), Color.FromArgb(208, 135, 112), Color.FromArgb(65, 55, 35), Color.FromArgb(235, 203, 139)),
         new("Solarized Dark", Color.FromArgb(0, 43, 54), Color.FromArgb(7, 54, 66), Color.FromArgb(238, 232, 213), Color.FromArgb(147, 161, 161), Color.FromArgb(38, 139, 210), Color.FromArgb(133, 153, 0), Color.FromArgb(203, 75, 22), Color.FromArgb(55, 45, 20), Color.FromArgb(181, 137, 0)),
-        new("Light", Color.FromArgb(248, 249, 252), Color.White, Color.FromArgb(30, 35, 45), Color.FromArgb(85, 95, 110), Color.FromArgb(25, 115, 210), Color.FromArgb(25, 165, 85), Color.FromArgb(220, 125, 20), Color.FromArgb(255, 244, 205), Color.FromArgb(180, 120, 0))
+        new("Light", Color.FromArgb(248, 249, 252), Color.White, Color.FromArgb(15, 23, 42), Color.FromArgb(42, 52, 67), Color.FromArgb(0, 95, 170), Color.FromArgb(20, 145, 75), Color.FromArgb(205, 105, 10), Color.FromArgb(255, 239, 185), Color.FromArgb(155, 100, 0)),
+        new("Glass", Color.FromArgb(22, 32, 48), Color.FromArgb(38, 54, 76), Color.FromArgb(235, 244, 255), Color.FromArgb(180, 202, 225), Color.FromArgb(105, 190, 255), Color.FromArgb(80, 225, 165), Color.FromArgb(255, 190, 90), Color.FromArgb(35, 50, 72), Color.FromArgb(145, 215, 255))
     ];
     public static ThemePalette Current { get; private set; } = Default;
     public static void Load()
     {
         try { var name = File.ReadAllText(Path).Trim(); Current = Themes.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) ?? Default; } catch { Current = Default; }
+        Brushes.SetTextColor(Current.Text);
     }
     public static void Set(ThemePalette theme)
     {
         Current = theme;
+        Brushes.SetTextColor(theme.Text);
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
         File.WriteAllText(Path, theme.Name);
     }
     public static void ApplyTo(Form form)
     {
         form.BackColor = Current.Background;
+        form.Opacity = Current.Name == "Glass" ? 0.9 : 1.0;
         ApplyToControl(form, Current);
     }
     private static void ApplyToControl(Control control, ThemePalette theme)
     {
         if (control is Form) control.BackColor = theme.Background;
-        else if (control is GraphCanvas or AnalyticsChart) control.BackColor = theme.Panel;
-        else if (control is Panel) control.BackColor = theme.Background;
+        else if (control is GraphCanvas or AnalyticsChart or AnalyticsDashboard) control.BackColor = theme.Panel;
+        else if (control is Panel panel && (panel.Dock == DockStyle.Top || panel.Dock == DockStyle.Bottom)) control.BackColor = theme.Background;
         if (control is Label label) label.ForeColor = theme.Text;
         if (control is Button button)
         {
@@ -64,8 +68,19 @@ internal static class ThemeManager
     }
 }
 
+internal static class Brushes
+{
+    public static Brush White { get; private set; } = new SolidBrush(Color.White);
+    public static void SetTextColor(Color color)
+    {
+        White.Dispose();
+        White = new SolidBrush(color);
+    }
+}
+
 internal sealed class TrayContext : ApplicationContext
 {
+    private static readonly Version CurrentVersion = new(2, 0, 1);
     private readonly NotifyIcon tray;
     private readonly UsageClient client = new();
     private readonly ResetDataClient resetClient = new();
@@ -76,6 +91,8 @@ internal sealed class TrayContext : ApplicationContext
     private bool busy;
     private readonly System.Windows.Forms.Timer refreshTimer;
     private readonly System.Windows.Forms.Timer resetTimer;
+    private readonly System.Windows.Forms.Timer updateTimer;
+    private readonly UpdateChecker updateChecker = new();
     private int refreshMinutes = 1;
     private int graphDays = 7;
     private ResetData? resetData;
@@ -94,8 +111,12 @@ internal sealed class TrayContext : ApplicationContext
         resetTimer = new System.Windows.Forms.Timer { Interval = 60 * 60 * 1000 };
         resetTimer.Tick += async (_, _) => await RefreshResetDataAsync();
         resetTimer.Start();
+        updateTimer = new System.Windows.Forms.Timer { Interval = 24 * 60 * 60 * 1000 };
+        updateTimer.Tick += async (_, _) => await CheckForUpdatesAsync(false);
+        updateTimer.Start();
         _ = RefreshAsync();
         _ = RefreshResetDataAsync();
+        _ = CheckForUpdatesAsync(false);
     }
 
     private ContextMenuStrip Menu()
@@ -104,6 +125,8 @@ internal sealed class TrayContext : ApplicationContext
         m.Items.Add("Open Codex limits", null, (_, _) => ShowGraph());
         m.Items.Add("Open Codex usage", null, (_, _) => ShowAnalytics());
         m.Items.Add("Refresh now", null, async (_, _) => await RefreshAsync());
+        m.Items.Add("Check for updates", null, async (_, _) => await CheckForUpdatesAsync(true));
+        m.Items.Add("GitHub repository", null, (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("https://github.com/colemanuk82/CodexUsageTray") { UseShellExecute = true }));
         var refreshMenu = new ToolStripMenuItem("Refresh interval");
         foreach (var minutes in new[] { 1, 5 })
         {
@@ -165,6 +188,23 @@ internal sealed class TrayContext : ApplicationContext
         if (analytics != null && !analytics.IsDisposed) ThemeManager.ApplyTo(analytics);
         tray.ContextMenuStrip = Menu();
     }
+    private async Task CheckForUpdatesAsync(bool notifyWhenCurrent)
+    {
+        try
+        {
+            var update = await updateChecker.GetLatestAsync();
+            if (update == null) { if (notifyWhenCurrent) ShowUpdateNotice("Update check unavailable", "GitHub could not be reached right now."); return; }
+            if (update.Version > CurrentVersion) ShowUpdateNotice("Codex Usage Tray update available", $"Version {update.Version} is available on GitHub.");
+            else if (notifyWhenCurrent) ShowUpdateNotice("Codex Usage Tray is up to date", $"You are running version {CurrentVersion}.");
+        }
+        catch (Exception ex) { if (notifyWhenCurrent) ShowUpdateNotice("Update check unavailable", "GitHub could not be reached right now."); System.Diagnostics.Debug.WriteLine(ex); }
+    }
+    private void ShowUpdateNotice(string title, string message)
+    {
+        tray.BalloonTipTitle = title;
+        tray.BalloonTipText = message;
+        tray.ShowBalloonTip(7000);
+    }
 
     private void UpdateIcon() { var old = tray.Icon; tray.Icon = MakeIcon(latest); old?.Dispose(); }
 
@@ -211,7 +251,7 @@ internal sealed class TrayContext : ApplicationContext
     {
         try { return JsonSerializer.Deserialize<State>(File.ReadAllText(stateFile))?.History ?? []; } catch { return []; }
     }
-    protected override void ExitThreadCore() { refreshTimer.Dispose(); resetTimer.Dispose(); tray.Visible = false; tray.Dispose(); base.ExitThreadCore(); }
+    protected override void ExitThreadCore() { refreshTimer.Dispose(); resetTimer.Dispose(); updateTimer.Dispose(); tray.Visible = false; tray.Dispose(); base.ExitThreadCore(); }
 
     private Icon MakeIcon(UsageSnapshot? s)
     {
@@ -268,6 +308,25 @@ internal sealed class UsageClient
             if (value.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(value.GetString(), out var parsed)) return parsed;
         }
         return null;
+    }
+}
+
+internal sealed record UpdateInfo(Version Version, string Url);
+internal sealed class UpdateChecker
+{
+    private static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(15) };
+    public async Task<UpdateInfo?> GetLatestAsync()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com/repos/colemanuk82/CodexUsageTray/releases/latest");
+        request.Headers.UserAgent.ParseAdd("CodexUsageTray-update-check");
+        using var response = await http.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = document.RootElement;
+        var tag = root.TryGetProperty("tag_name", out var tagValue) ? tagValue.GetString() : null;
+        var url = root.TryGetProperty("html_url", out var urlValue) ? urlValue.GetString() : null;
+        if (string.IsNullOrWhiteSpace(tag) || !Version.TryParse(tag.TrimStart('v', 'V'), out var version)) return null;
+        return new UpdateInfo(version, url ?? "https://github.com/colemanuk82/CodexUsageTray/releases");
     }
 }
 
@@ -352,11 +411,11 @@ internal sealed class AnalyticsDashboard : Panel
     private readonly Button swapButton;
     public List<CodexUsageRecord> Records { get; set; } = []; public int Days { get; set; } = 30; public int RefreshMinutes { get; set; } = 1; public DateTime StartDate { get; set; } = DateTime.Today.AddDays(-29); public event Action? GraphRangeClicked; public event Action? RefreshClicked; public event Action? LimitsClicked; private RectangleF rangeHit; private RectangleF refreshHit; private RectangleF limitsHit;
     public AnalyticsDashboard() { BackColor = Color.Black; DoubleBuffered = true; swapButton = UiIcons.CreateSwapButton(); swapButton.Click += (_, _) => LimitsClicked?.Invoke(); Controls.Add(swapButton); PositionSwapButton(); Resize += (_, _) => PositionSwapButton(); MouseClick += (_, e) => { const float scale = 1.2f; var point = new PointF(e.X / scale, e.Y / scale); if (rangeHit.Contains(point)) GraphRangeClicked?.Invoke(); else if (refreshHit.Contains(point)) RefreshClicked?.Invoke(); else if (limitsHit.Contains(point)) LimitsClicked?.Invoke(); }; }
-    private void PositionSwapButton() { swapButton.Location = new Point((ClientSize.Width - swapButton.Width) / 2, Math.Max(0, ClientSize.Height - 53)); }
+    private void PositionSwapButton() { swapButton.Location = new Point((ClientSize.Width - swapButton.Width) / 2, Math.Max(0, ClientSize.Height - 64)); }
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e); e.Graphics.Clear(BackColor); const float scale = 1.2f; e.Graphics.ScaleTransform(scale, scale); var displayWidth = Width / scale; var displayHeight = Height / scale; var records = Records; var total = records.Sum(x => x.TotalTokens); var calls = records.Count; var sessions = records.Select(x => x.SessionId).Distinct().Count(); var cached = records.Sum(x => x.CachedInputTokens); var groups = records.GroupBy(x => ModelCostEstimator.DisplayModel(x.Model)).OrderByDescending(g => g.Sum(x => x.TotalTokens)).ToList();
-        using var title = new Font("Segoe UI", 38, FontStyle.Bold, GraphicsUnit.Pixel); using var metric = new Font("Segoe UI", 28, FontStyle.Bold, GraphicsUnit.Pixel); using var normal = new Font("Segoe UI", 23, FontStyle.Regular, GraphicsUnit.Pixel); using var section = new Font("Segoe UI", 30, FontStyle.Bold, GraphicsUnit.Pixel); using var label = new Font("Segoe UI", 27, FontStyle.Regular, GraphicsUnit.Pixel); using var average = new Font("Segoe UI", 37, FontStyle.Regular, GraphicsUnit.Pixel); using var muted = new SolidBrush(Color.LightSteelBlue); using var grid = new Pen(Color.FromArgb(56, 62, 72)); using var green = new SolidBrush(Color.FromArgb(55, 225, 95));
+        using var title = new Font("Segoe UI", 38, FontStyle.Bold, GraphicsUnit.Pixel); using var metric = new Font("Segoe UI", 28, FontStyle.Bold, GraphicsUnit.Pixel); using var normal = new Font("Segoe UI", 23, FontStyle.Bold, GraphicsUnit.Pixel); using var section = new Font("Segoe UI", 30, FontStyle.Bold, GraphicsUnit.Pixel); using var label = new Font("Segoe UI", 27, FontStyle.Bold, GraphicsUnit.Pixel); using var average = new Font("Segoe UI", 37, FontStyle.Bold, GraphicsUnit.Pixel); using var muted = new SolidBrush(ThemeManager.Current.Muted); using var grid = new Pen(Color.FromArgb(56, 62, 72)); using var green = new SolidBrush(ThemeManager.Current.Good);
         e.Graphics.DrawString("Codex usage", title, Brushes.White, 48, 36); e.Graphics.DrawString($"{FormatTokens(total)} tokens", metric, Brushes.White, 48, 105); e.Graphics.DrawString($"{FormatTokens(calls)} calls", metric, Brushes.White, 325, 105); e.Graphics.DrawString($"{FormatTokens(sessions)} sessions", metric, Brushes.White, 470, 105); e.Graphics.DrawString($"{FormatTokens(cached)} cached input tokens", metric, Brushes.White, 48, 148); e.Graphics.DrawString($"Avg/day: {FormatTokens((long)(total / (double)Math.Max(1, Days)))}", metric, Brushes.White, 48, 198);
         var graphHeadingY = 290; var plotTop = 375; var left = 120; var right = displayWidth - 60; var bottom = 600; e.Graphics.DrawString("Daily Codex usage", section, Brushes.White, 48, graphHeadingY); var rangeLabel = $"Graph: {Days} day{(Days == 1 ? "" : "s")}"; var refreshLabel = $"Refresh: {RefreshMinutes} min"; var rangeSize = e.Graphics.MeasureString(rangeLabel, normal); var refreshSize = e.Graphics.MeasureString(refreshLabel, normal); var rangeX = right - rangeSize.Width; var refreshX = rangeX - refreshSize.Width - 28; using var control = new SolidBrush(Color.FromArgb(45, 155, 255)); e.Graphics.DrawString(refreshLabel, normal, control, refreshX, graphHeadingY + 6); e.Graphics.DrawString(rangeLabel, normal, control, rangeX, graphHeadingY + 6); refreshHit = new RectangleF(refreshX - 8, graphHeadingY - 2, refreshSize.Width + 16, normal.Height + 18); rangeHit = new RectangleF(rangeX - 8, graphHeadingY - 2, rangeSize.Width + 16, normal.Height + 18); var start = StartDate.Date; var bucketHours = Days == 1 ? 1 : Days == 7 ? 6 : 24; var bucketCount = Days * 24 / bucketHours; var daily = Enumerable.Range(0, bucketCount).Select(i => { var bucketStart = start.AddHours(i * bucketHours); var bucketEnd = bucketStart.AddHours(bucketHours); return records.Where(record => { var local = record.At.ToLocalTime(); return local >= bucketStart && local < bucketEnd; }).Sum(record => record.TotalTokens); }).ToList(); var max = Math.Max(1, daily.Max()); for (var i = 0; i <= 4; i++) { var y = plotTop + i * (bottom - plotTop) / 4; e.Graphics.DrawLine(grid, left, y, right, y); e.Graphics.DrawString(FormatTokens(max * (4 - i) / 4), normal, muted, 28, y - 14); } var points = daily.Select((value, i) => new PointF(bucketCount == 1 ? (left + right) / 2f : left + i * (right - left) / (float)(bucketCount - 1), bottom - (float)(value / (double)max * (bottom - plotTop)))).ToList(); using var linePen = new Pen(Color.FromArgb(55, 225, 95), 3); for (var i = 1; i < points.Count; i++) e.Graphics.DrawLine(linePen, points[i - 1], points[i]); foreach (var point in points) e.Graphics.FillEllipse(green, point.X - 4, point.Y - 4, 8, 8); if (Days == 1) { for (var i = 0; i <= 4; i++) { var tickX = left + i * (right - left) / 4f; var tickLabel = start.AddHours(i * 6).ToString("HH:mm"); var labelSize = e.Graphics.MeasureString(tickLabel, normal); e.Graphics.DrawString(tickLabel, normal, muted, tickX - labelSize.Width / 2, bottom + 16); } } else { e.Graphics.DrawString(start.ToString("dd MMM"), normal, muted, left - 7, bottom + 16); var end = (start.AddDays(Days - 1)).ToString("dd MMM"); var endSize = e.Graphics.MeasureString(end, normal); e.Graphics.DrawString(end, normal, muted, right - endSize.Width, bottom + 16); }
         var modelsTop = 700; e.Graphics.DrawString("Model usage", section, Brushes.White, 64, modelsTop); var barX = 64; var barY = modelsTop + 44; var barWidth = displayWidth - 128; var groupTotal = Math.Max(1, groups.Sum(g => g.Sum(x => x.TotalTokens))); var x = barX; foreach (var group in groups) { var width = (int)(barWidth * group.Sum(r => r.TotalTokens) / (double)groupTotal); using var brush = new SolidBrush(ModelCostEstimator.ColorFor(group.Key)); e.Graphics.FillRectangle(brush, x, barY, Math.Max(1, width), 24); x += width; }
@@ -381,6 +440,7 @@ internal sealed class AnalyticsForm : Form
         UiIcons.ApplyRoundedCorners(this);
     }
     protected override void OnResize(EventArgs e) { base.OnResize(e); UiIcons.ApplyRoundedCorners(this); }
+    protected override void OnPaint(PaintEventArgs e) { base.OnPaint(e); UiIcons.DrawWindowBorder(e.Graphics, ClientRectangle, ThemeManager.Current.Accent); }
     protected override void SetVisibleCore(bool value)
     {
         ShowInTaskbar = false;
@@ -435,6 +495,13 @@ internal static class UiIcons
         button.FlatAppearance.BorderSize = 1;
         return button;
     }
+    public static void DrawWindowBorder(Graphics graphics, Rectangle bounds, Color color)
+    {
+        if (bounds.Width < 4 || bounds.Height < 4) return;
+        using var path = RoundedPath(new RectangleF(1, 1, bounds.Width - 2, bounds.Height - 2), 18);
+        using var pen = new Pen(color, 1);
+        graphics.DrawPath(pen, path);
+    }
     private static GraphicsPath RoundedPath(RectangleF bounds, float radius)
     {
         var path = new GraphicsPath();
@@ -486,6 +553,7 @@ internal sealed class GraphForm : Form
         UiIcons.ApplyRoundedCorners(this);
     }
     protected override void OnResize(EventArgs e) { base.OnResize(e); UiIcons.ApplyRoundedCorners(this); }
+    protected override void OnPaint(PaintEventArgs e) { base.OnPaint(e); UiIcons.DrawWindowBorder(e.Graphics, ClientRectangle, ThemeManager.Current.Accent); }
     protected override void SetVisibleCore(bool value)
     {
         ShowInTaskbar = false;
@@ -498,9 +566,9 @@ internal sealed class GraphForm : Form
         var swap = footer?.Controls.OfType<Button>().FirstOrDefault(button => button.Text == "Swap");
         if (footer != null && swap != null)
         {
-            footer.Height = 136;
+            footer.Height = 160;
             swap.Size = new Size(160, 40);
-            swap.Location = new Point((footer.ClientSize.Width - swap.Width) / 2, 89);
+            swap.Location = new Point((footer.ClientSize.Width - swap.Width) / 2, 96);
         }
     }
     public void SetResetData(ResetData? data) { resetChanceValue.Text = data == null ? "Reset chance: unavailable" : $"Next reset chance: {data.ChancePercent}% (48h)"; var latest = data?.Events.OrderByDescending(x => x.AnnouncedAt).FirstOrDefault(); lastResetValue.Text = latest == null ? "Last reset: unavailable" : $"Days since last reset: {Math.Max(0, (DateTimeOffset.UtcNow - latest.AnnouncedAt).TotalDays):0.0}"; canvas.ResetEvents = data?.Events ?? []; canvas.Invalidate(); }
@@ -558,7 +626,7 @@ internal sealed class GraphCanvas : Panel
     }
     protected override void OnPaint(PaintEventArgs e)
     {
-        e.Graphics.Clear(BackColor); var plot = new Rectangle(120, 100, Math.Max(100, Width - 180), Math.Max(100, Height - 170)); using var grid = new Pen(Color.FromArgb(38, 43, 48)); using var text = new SolidBrush(Color.FromArgb(180, 190, 205)); using var font = new Font("Segoe UI", 7);
+        e.Graphics.Clear(BackColor); var plot = new Rectangle(120, 100, Math.Max(100, Width - 180), Math.Max(100, Height - 170)); using var grid = new Pen(Color.FromArgb(38, 43, 48)); using var text = new SolidBrush(ThemeManager.Current.Muted); using var font = new Font("Segoe UI", 7);
         for (int i = 0; i <= 4; i++) { var y = plot.Top + i * plot.Height / 4; e.Graphics.DrawLine(grid, plot.Left, y, plot.Right, y); e.Graphics.DrawString($"{100 - i * 25}%", font, text, 18, y - 8); }
         using var heading = new Font("Segoe UI", 10, FontStyle.Bold); e.Graphics.DrawString("Remaining usage", heading, Brushes.White, 34, 20); if (RangeDays == 1) { for (var i = 0; i <= 4; i++) { var x = plot.Left + i * plot.Width / 4f; e.Graphics.DrawLine(grid, x, plot.Top, x, plot.Bottom); var label = DateTimeOffset.UtcNow.AddHours(-24 + i * 6).ToLocalTime().ToString("HH:mm"); var labelSize = e.Graphics.MeasureString(label, font); e.Graphics.DrawString(label, font, text, x - labelSize.Width / 2, plot.Bottom + 12); } } else { e.Graphics.DrawString($"{RangeDays} day{(RangeDays == 1 ? "" : "s")} ago", font, text, plot.Left, plot.Bottom + 12); e.Graphics.DrawString("Today", font, text, plot.Right - 55, plot.Bottom + 12); }
         var rangeStart = DateTimeOffset.UtcNow.AddDays(-RangeDays);
