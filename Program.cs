@@ -102,6 +102,7 @@ internal sealed class TrayContext : ApplicationContext
         Directory.CreateDirectory(Path.GetDirectoryName(stateFile)!);
         ThemeManager.Load();
         resetData = resetClient.LoadCached();
+        if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("CodexUsageTray") is string) SetStartup(true);
         tray = new NotifyIcon { Visible = true, Text = "Codex usage", Icon = MakeIcon(null) };
         tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) TogglePopout(); };
         tray.ContextMenuStrip = Menu();
@@ -235,11 +236,19 @@ internal sealed class TrayContext : ApplicationContext
         analytics = new AnalyticsForm(ShowGraph, refreshMinutes, SetRefreshMinutes); ThemeManager.ApplyTo(analytics); analytics.FormClosed += (_, _) => analytics = null; analytics.Show(); analytics.PlaceAboveTray(); analytics.Activate();
     }
 
-    private bool StartupEnabled => Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("CodexUsageTray") != null;
+    private static string StartupPath => Environment.ProcessPath ?? Application.ExecutablePath;
+    private bool StartupEnabled
+    {
+        get
+        {
+            var value = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("CodexUsageTray") as string;
+            return value?.Trim().Trim('"').Equals(StartupPath, StringComparison.OrdinalIgnoreCase) == true;
+        }
+    }
     private void SetStartup(bool enabled)
     {
         using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-        if (enabled) key.SetValue("CodexUsageTray", $"\"{Application.ExecutablePath}\"");
+        if (enabled) key.SetValue("CodexUsageTray", $"\"{StartupPath}\"");
         else key.DeleteValue("CodexUsageTray", false);
     }
     private void SaveSnapshot(UsageSnapshot s)
