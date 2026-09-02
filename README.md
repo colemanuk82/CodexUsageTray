@@ -40,6 +40,16 @@ The screenshots below show the tray-only Release interface; the popouts do not a
 
 ![Codex usage popout](docs/usage-popout.png)
 
+### Theme gallery
+
+The same popouts can be restyled from the tray menu. These current captures show AMOLED, Dracula, and Light:
+
+| Theme | Limits | Usage |
+| --- | --- | --- |
+| AMOLED | ![AMOLED limits](docs/theme-amoled-limits.png) | ![AMOLED usage](docs/theme-amoled-usage.png) |
+| Dracula | ![Dracula limits](docs/theme-dracula-limits.png) | ![Dracula usage](docs/theme-dracula-usage.png) |
+| Light | ![Light limits](docs/theme-light-limits.png) | ![Light usage](docs/theme-light-usage.png) |
+
 ## Themes
 
 Themes are selected from the tray icon’s right-click menu and apply to both popouts:
@@ -105,7 +115,7 @@ All usage processing and history storage are local to the Windows machine. The a
 
 ## Installation
 
-Download `CodexUsageTray-v2.0.3-Setup.exe` from the [GitHub release](https://github.com/colemanuk82/CodexUsageTray/releases/tag/v2.0.3) and run it. The installer installs the current Release build for the signed-in Windows user under `%LOCALAPPDATA%\\CodexUsageTray`, replaces an older running copy, and launches the tray icon.
+Download `CodexUsageTray-v2.0.4-Setup.exe` from the [GitHub release](https://github.com/colemanuk82/CodexUsageTray/releases/tag/v2.0.4) and run it. The installer installs the current Release build for the signed-in Windows user under `%LOCALAPPDATA%\\CodexUsageTray`, replaces an older running copy, and launches the tray icon.
 
 ## Build
 

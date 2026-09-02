@@ -80,7 +80,7 @@ internal static class Brushes
 
 internal sealed class TrayContext : ApplicationContext
 {
-    private static readonly Version CurrentVersion = new(2, 0, 3);
+    private static readonly Version CurrentVersion = new(2, 0, 4);
     private readonly NotifyIcon tray;
     private readonly UsageClient client = new();
     private readonly ResetDataClient resetClient = new();
@@ -472,7 +472,7 @@ internal sealed class AnalyticsForm : Form
     private void ResizeForModels() { var modelCount = all.Select(x => ModelCostEstimator.DisplayModel(x.Model)).Distinct(StringComparer.OrdinalIgnoreCase).Count(); var rows = Math.Max(1, (int)Math.Ceiling(modelCount / 2d)); var desiredHeight = 1360 + (rows - 1) * 180; if (Height == desiredHeight) return; Height = desiredHeight; PlaceAboveTray(); }
     private (DateTime Start, int Days) PeriodWindow() => (DateTime.Today.AddDays(-graphDays + 1), graphDays);
     private void Render() { var window = PeriodWindow(); dashboard.Records = all.Where(x => x.At.ToLocalTime().Date >= window.Start && x.At.ToLocalTime().Date < window.Start.AddDays(window.Days)).ToList(); dashboard.Days = window.Days; dashboard.RefreshMinutes = refreshMinutes; dashboard.StartDate = window.Start; dashboard.Invalidate(); }
-    public void PlaceAboveTray() { var area = Screen.GetWorkingArea(Cursor.Position); Height = Math.Min(Height, Math.Max(MinimumSize.Height, area.Height - 16)); Width = Math.Min(Width, Math.Max(MinimumSize.Width, area.Width - 16)); Location = new Point(Math.Max(area.Left, area.Right - Width - 8), Math.Max(area.Top, area.Bottom - Height)); }
+    public void PlaceAboveTray() { var area = Screen.GetWorkingArea(Cursor.Position); Height = Math.Min(Height, Math.Max(MinimumSize.Height, area.Height - 16)); Width = Math.Min(Width, Math.Max(MinimumSize.Width, area.Width - 16)); var left = Math.Clamp(Cursor.Position.X - Width / 2, area.Left, area.Right - Width); Location = new Point(left, Math.Max(area.Top, area.Bottom - Height)); }
 }
 
 internal sealed class ResetData { public int ChancePercent { get; set; } public DateTimeOffset FetchedAt { get; set; } public List<ResetEvent> Events { get; set; } = []; }
@@ -626,7 +626,8 @@ internal sealed class GraphForm : Form
         var area = Screen.GetWorkingArea(Cursor.Position);
         Height = Math.Min(Height, Math.Max(MinimumSize.Height, area.Height - 16));
         Width = Math.Min(Width, Math.Max(MinimumSize.Width, area.Width - 16));
-        Location = new Point(Math.Max(area.Left, area.Right - Width - 8), Math.Max(area.Top, area.Bottom - Height));
+        var left = Math.Clamp(Cursor.Position.X - Width / 2, area.Left, area.Right - Width);
+        Location = new Point(left, Math.Max(area.Top, area.Bottom - Height));
     }
 }
 
