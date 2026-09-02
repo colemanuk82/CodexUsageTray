@@ -80,7 +80,7 @@ internal static class Brushes
 
 internal sealed class TrayContext : ApplicationContext
 {
-    private static readonly Version CurrentVersion = new(2, 0, 1);
+    private static readonly Version CurrentVersion = new(2, 0, 3);
     private readonly NotifyIcon tray;
     private readonly UsageClient client = new();
     private readonly ResetDataClient resetClient = new();
@@ -329,13 +329,26 @@ internal sealed class UpdateChecker
         using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com/repos/colemanuk82/CodexUsageTray/releases/latest");
         request.Headers.UserAgent.ParseAdd("CodexUsageTray-update-check");
         using var response = await http.SendAsync(request);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode) return await GetLatestFromReleasePageAsync();
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var root = document.RootElement;
         var tag = root.TryGetProperty("tag_name", out var tagValue) ? tagValue.GetString() : null;
         var url = root.TryGetProperty("html_url", out var urlValue) ? urlValue.GetString() : null;
         if (string.IsNullOrWhiteSpace(tag) || !Version.TryParse(tag.TrimStart('v', 'V'), out var version)) return null;
         return new UpdateInfo(version, url ?? "https://github.com/colemanuk82/CodexUsageTray/releases");
+    }
+    private static async Task<UpdateInfo?> GetLatestFromReleasePageAsync()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "https://github.com/colemanuk82/CodexUsageTray/releases/latest");
+        request.Headers.UserAgent.ParseAdd("CodexUsageTray-update-check");
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        if (!response.IsSuccessStatusCode) return null;
+        var finalUrl = response.RequestMessage?.RequestUri?.ToString();
+        const string marker = "/releases/tag/";
+        var markerIndex = finalUrl?.IndexOf(marker, StringComparison.OrdinalIgnoreCase) ?? -1;
+        if (markerIndex < 0) return null;
+        var tag = finalUrl![(markerIndex + marker.Length)..].Trim('/');
+        return Version.TryParse(tag.TrimStart('v', 'V'), out var version) ? new UpdateInfo(version, finalUrl!) : null;
     }
 }
 
