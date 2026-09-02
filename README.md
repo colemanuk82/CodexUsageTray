@@ -10,9 +10,8 @@ Codex Usage Tray lives in the Windows status area and keeps the useful numbers c
 ## See it in action
 
 <p align="center">
-  <img src="docs/limits-popout.png" alt="Codex limits popout" width="420">
-  &nbsp;&nbsp;&nbsp;
-  <img src="docs/usage-popout.png" alt="Codex usage popout" width="420">
+  <img src="docs/limits-popout.png" alt="Codex limits popout" width="320">&nbsp;
+  <img src="docs/usage-popout.png" alt="Codex usage popout" width="320">
 </p>
 
 <p align="center"><em>Codex limits and Codex usage — compact, themeable popouts anchored to the status icon.</em></p>
