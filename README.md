@@ -15,6 +15,7 @@ A lightweight Windows system-tray monitor for Codex limits, usage history, model
 - Predicted API cost by model and estimated total cost.
 - Automatic refresh at a selectable 1-minute or 5-minute interval.
 - Popout switcher between Codex limits and Codex usage.
+- Theme presets: Default, AMOLED, Dracula, Nord, Solarized Dark, and Light.
 - Start with Windows option.
 - Local history and rate caching.
 - No account credentials or usage history are uploaded by this application.

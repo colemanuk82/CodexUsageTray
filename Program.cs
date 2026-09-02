@@ -19,6 +19,51 @@ internal static class Program
     }
 }
 
+internal sealed record ThemePalette(string Name, Color Background, Color Panel, Color Text, Color Muted, Color Accent, Color Good, Color Warning, Color SwapBackground, Color Swap);
+
+internal static class ThemeManager
+{
+    private static readonly string Path = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexUsageTray", "theme.txt");
+    public static readonly ThemePalette Default = new("Default", Color.Black, Color.FromArgb(24, 25, 29), Color.White, Color.LightSteelBlue, Color.FromArgb(45, 155, 255), Color.FromArgb(55, 225, 95), Color.FromArgb(255, 165, 55), Color.FromArgb(55, 46, 16), Color.FromArgb(255, 210, 70));
+    public static readonly IReadOnlyList<ThemePalette> Themes =
+    [
+        Default,
+        new("AMOLED", Color.Black, Color.FromArgb(3, 8, 10), Color.White, Color.FromArgb(180, 220, 230), Color.FromArgb(0, 190, 255), Color.FromArgb(0, 255, 120), Color.FromArgb(255, 185, 0), Color.FromArgb(35, 30, 0), Color.FromArgb(255, 220, 60)),
+        new("Dracula", Color.FromArgb(40, 42, 54), Color.FromArgb(68, 71, 90), Color.FromArgb(248, 248, 242), Color.FromArgb(189, 187, 205), Color.FromArgb(139, 233, 253), Color.FromArgb(80, 250, 123), Color.FromArgb(255, 184, 108), Color.FromArgb(75, 55, 25), Color.FromArgb(255, 184, 108)),
+        new("Nord", Color.FromArgb(46, 52, 64), Color.FromArgb(59, 66, 82), Color.FromArgb(236, 239, 244), Color.FromArgb(216, 222, 233), Color.FromArgb(136, 192, 208), Color.FromArgb(163, 190, 140), Color.FromArgb(208, 135, 112), Color.FromArgb(65, 55, 35), Color.FromArgb(235, 203, 139)),
+        new("Solarized Dark", Color.FromArgb(0, 43, 54), Color.FromArgb(7, 54, 66), Color.FromArgb(238, 232, 213), Color.FromArgb(147, 161, 161), Color.FromArgb(38, 139, 210), Color.FromArgb(133, 153, 0), Color.FromArgb(203, 75, 22), Color.FromArgb(55, 45, 20), Color.FromArgb(181, 137, 0)),
+        new("Light", Color.FromArgb(248, 249, 252), Color.White, Color.FromArgb(30, 35, 45), Color.FromArgb(85, 95, 110), Color.FromArgb(25, 115, 210), Color.FromArgb(25, 165, 85), Color.FromArgb(220, 125, 20), Color.FromArgb(255, 244, 205), Color.FromArgb(180, 120, 0))
+    ];
+    public static ThemePalette Current { get; private set; } = Default;
+    public static void Load()
+    {
+        try { var name = File.ReadAllText(Path).Trim(); Current = Themes.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) ?? Default; } catch { Current = Default; }
+    }
+    public static void Set(ThemePalette theme)
+    {
+        Current = theme;
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
+        File.WriteAllText(Path, theme.Name);
+    }
+    public static void ApplyTo(Form form)
+    {
+        form.BackColor = Current.Background;
+        ApplyToControl(form, Current);
+    }
+    private static void ApplyToControl(Control control, ThemePalette theme)
+    {
+        if (control is Form) control.BackColor = theme.Background;
+        else if (control is GraphCanvas or AnalyticsChart) control.BackColor = theme.Panel;
+        else if (control is Panel) control.BackColor = theme.Background;
+        if (control is Label label) label.ForeColor = theme.Text;
+        if (control is Button button)
+        {
+            button.BackColor = theme.SwapBackground; button.ForeColor = theme.Swap; button.FlatAppearance.BorderColor = theme.Swap;
+        }
+        foreach (Control child in control.Controls) ApplyToControl(child, theme);
+    }
+}
+
 internal sealed class TrayContext : ApplicationContext
 {
     private readonly NotifyIcon tray;
@@ -38,6 +83,7 @@ internal sealed class TrayContext : ApplicationContext
     public TrayContext()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(stateFile)!);
+        ThemeManager.Load();
         resetData = resetClient.LoadCached();
         tray = new NotifyIcon { Visible = true, Text = "Codex usage", Icon = MakeIcon(null) };
         tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) TogglePopout(); };
@@ -74,6 +120,14 @@ internal sealed class TrayContext : ApplicationContext
             durationMenu.DropDownItems.Add(item);
         }
         m.Items.Add(durationMenu);
+        var themeMenu = new ToolStripMenuItem("Theme");
+        foreach (var theme in ThemeManager.Themes)
+        {
+            var item = new ToolStripMenuItem(theme.Name) { Checked = ThemeManager.Current.Name == theme.Name };
+            item.Click += (_, _) => SetTheme(theme);
+            themeMenu.DropDownItems.Add(item);
+        }
+        m.Items.Add(themeMenu);
         var startup = new ToolStripMenuItem("Start with Windows") { Checked = StartupEnabled, CheckOnClick = true };
         startup.CheckedChanged += (_, _) => { SetStartup(startup.Checked); };
         m.Items.Add(startup);
@@ -103,6 +157,14 @@ internal sealed class TrayContext : ApplicationContext
     }
     private void SetRefreshMinutes(int minutes) { refreshMinutes = minutes; refreshTimer.Interval = minutes * 60 * 1000; graph?.SetOptions(refreshMinutes, graphDays); analytics?.SetRefreshMinutes(refreshMinutes); }
     private void SetGraphDays(int days) { graphDays = days; graph?.SetOptions(refreshMinutes, graphDays); }
+    private void SetTheme(ThemePalette theme)
+    {
+        ThemeManager.Set(theme);
+        UpdateIcon();
+        if (graph != null && !graph.IsDisposed) ThemeManager.ApplyTo(graph);
+        if (analytics != null && !analytics.IsDisposed) ThemeManager.ApplyTo(analytics);
+        tray.ContextMenuStrip = Menu();
+    }
 
     private void UpdateIcon() { var old = tray.Icon; tray.Icon = MakeIcon(latest); old?.Dispose(); }
 
@@ -113,9 +175,10 @@ internal sealed class TrayContext : ApplicationContext
         if (graph != null && !graph.IsDisposed)
         {
             if (graph.WindowState == FormWindowState.Minimized) graph.WindowState = FormWindowState.Normal;
-            graph.UpdateData(latest, ReadSnapshots()); graph.SetOptions(refreshMinutes, graphDays); graph.SetResetData(resetData); graph.PlaceAboveTray(); graph.BringToFront(); graph.Activate(); return;
+            graph.UpdateData(latest, ReadSnapshots()); graph.SetOptions(refreshMinutes, graphDays); graph.SetResetData(resetData); ThemeManager.ApplyTo(graph); graph.PlaceAboveTray(); graph.BringToFront(); graph.Activate(); return;
         }
         graph = new GraphForm(latest, ReadSnapshots(), refreshMinutes, graphDays, SetRefreshMinutes, SetGraphDays, resetData, ShowAnalytics);
+        ThemeManager.ApplyTo(graph);
         graph.FormClosed += (_, _) => graph = null;
         graph.Show(); graph.PlaceAboveTray(); graph.Activate();
     }
@@ -129,7 +192,7 @@ internal sealed class TrayContext : ApplicationContext
     {
         if (graph != null && !graph.IsDisposed) graph.Close();
         if (analytics != null && !analytics.IsDisposed) { if (analytics.WindowState == FormWindowState.Minimized) analytics.WindowState = FormWindowState.Normal; analytics.PlaceAboveTray(); analytics.BringToFront(); analytics.Activate(); return; }
-        analytics = new AnalyticsForm(ShowGraph, refreshMinutes, SetRefreshMinutes); analytics.FormClosed += (_, _) => analytics = null; analytics.Show(); analytics.PlaceAboveTray(); analytics.Activate();
+        analytics = new AnalyticsForm(ShowGraph, refreshMinutes, SetRefreshMinutes); ThemeManager.ApplyTo(analytics); analytics.FormClosed += (_, _) => analytics = null; analytics.Show(); analytics.PlaceAboveTray(); analytics.Activate();
     }
 
     private bool StartupEnabled => Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("CodexUsageTray") != null;
@@ -286,8 +349,10 @@ internal sealed class AnalyticsBreakdownPanel : Panel
 }
 internal sealed class AnalyticsDashboard : Panel
 {
+    private readonly Button swapButton;
     public List<CodexUsageRecord> Records { get; set; } = []; public int Days { get; set; } = 30; public int RefreshMinutes { get; set; } = 1; public DateTime StartDate { get; set; } = DateTime.Today.AddDays(-29); public event Action? GraphRangeClicked; public event Action? RefreshClicked; public event Action? LimitsClicked; private RectangleF rangeHit; private RectangleF refreshHit; private RectangleF limitsHit;
-    public AnalyticsDashboard() { BackColor = Color.Black; DoubleBuffered = true; MouseClick += (_, e) => { const float scale = 1.2f; var point = new PointF(e.X / scale, e.Y / scale); if (rangeHit.Contains(point)) GraphRangeClicked?.Invoke(); else if (refreshHit.Contains(point)) RefreshClicked?.Invoke(); else if (limitsHit.Contains(point)) LimitsClicked?.Invoke(); }; }
+    public AnalyticsDashboard() { BackColor = Color.Black; DoubleBuffered = true; swapButton = UiIcons.CreateSwapButton(); swapButton.Click += (_, _) => LimitsClicked?.Invoke(); Controls.Add(swapButton); PositionSwapButton(); Resize += (_, _) => PositionSwapButton(); MouseClick += (_, e) => { const float scale = 1.2f; var point = new PointF(e.X / scale, e.Y / scale); if (rangeHit.Contains(point)) GraphRangeClicked?.Invoke(); else if (refreshHit.Contains(point)) RefreshClicked?.Invoke(); else if (limitsHit.Contains(point)) LimitsClicked?.Invoke(); }; }
+    private void PositionSwapButton() { swapButton.Location = new Point((ClientSize.Width - swapButton.Width) / 2, Math.Max(0, ClientSize.Height - 53)); }
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e); e.Graphics.Clear(BackColor); const float scale = 1.2f; e.Graphics.ScaleTransform(scale, scale); var displayWidth = Width / scale; var displayHeight = Height / scale; var records = Records; var total = records.Sum(x => x.TotalTokens); var calls = records.Count; var sessions = records.Select(x => x.SessionId).Distinct().Count(); var cached = records.Sum(x => x.CachedInputTokens); var groups = records.GroupBy(x => ModelCostEstimator.DisplayModel(x.Model)).OrderByDescending(g => g.Sum(x => x.TotalTokens)).ToList();
@@ -313,7 +378,9 @@ internal sealed class AnalyticsForm : Form
     {
         ShowInTaskbar = false;
         base.OnLoad(e);
+        UiIcons.ApplyRoundedCorners(this);
     }
+    protected override void OnResize(EventArgs e) { base.OnResize(e); UiIcons.ApplyRoundedCorners(this); }
     protected override void SetVisibleCore(bool value)
     {
         ShowInTaskbar = false;
@@ -323,7 +390,7 @@ internal sealed class AnalyticsForm : Form
     private void ResizeForModels() { var modelCount = all.Select(x => ModelCostEstimator.DisplayModel(x.Model)).Distinct(StringComparer.OrdinalIgnoreCase).Count(); var rows = Math.Max(1, (int)Math.Ceiling(modelCount / 2d)); var desiredHeight = 1360 + (rows - 1) * 180; if (Height == desiredHeight) return; Height = desiredHeight; PlaceAboveTray(); }
     private (DateTime Start, int Days) PeriodWindow() => (DateTime.Today.AddDays(-graphDays + 1), graphDays);
     private void Render() { var window = PeriodWindow(); dashboard.Records = all.Where(x => x.At.ToLocalTime().Date >= window.Start && x.At.ToLocalTime().Date < window.Start.AddDays(window.Days)).ToList(); dashboard.Days = window.Days; dashboard.RefreshMinutes = refreshMinutes; dashboard.StartDate = window.Start; dashboard.Invalidate(); }
-    public void PlaceAboveTray() { var area = Screen.GetWorkingArea(Cursor.Position); Height = Math.Min(Height, Math.Max(MinimumSize.Height, area.Height - 16)); Width = Math.Min(Width, Math.Max(MinimumSize.Width, area.Width - 16)); Location = new Point(Math.Max(area.Left, area.Right - Width - 8), Math.Max(area.Top, area.Bottom - Height - 8)); }
+    public void PlaceAboveTray() { var area = Screen.GetWorkingArea(Cursor.Position); Height = Math.Min(Height, Math.Max(MinimumSize.Height, area.Height - 16)); Width = Math.Min(Width, Math.Max(MinimumSize.Width, area.Width - 16)); Location = new Point(Math.Max(area.Left, area.Right - Width - 8), Math.Max(area.Top, area.Bottom - Height)); }
 }
 
 internal sealed class ResetData { public int ChancePercent { get; set; } public DateTimeOffset FetchedAt { get; set; } public List<ResetEvent> Events { get; set; } = []; }
@@ -351,9 +418,33 @@ internal static class UiIcons
 {
     public static readonly Color SwitchColor = Color.FromArgb(255, 210, 70);
     public const float SwapFontSize = 10f;
+    private const float SwapCanvasFontSize = 11.1111f;
     public static void DrawSwapButton(Graphics graphics, RectangleF bounds, Color color)
     {
-        using var background = new SolidBrush(Color.FromArgb(55, 46, 16)); using var border = new Pen(color, 1.5f); using var font = new Font("Segoe UI", SwapFontSize, FontStyle.Bold, GraphicsUnit.Point); using var textBrush = new SolidBrush(color); using var centered = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center }; graphics.FillRoundedRectangle(background, bounds.X, bounds.Y, bounds.Width, bounds.Height, 6); graphics.DrawRoundedRectangle(border, bounds.X, bounds.Y, bounds.Width, bounds.Height, 6); graphics.DrawString("Swap", font, textBrush, bounds, centered);
+    }
+    public static void ApplyRoundedCorners(Form form)
+    {
+        if (form.ClientSize.Width <= 0 || form.ClientSize.Height <= 0) return;
+        using var path = RoundedPath(new RectangleF(0, 0, form.ClientSize.Width, form.ClientSize.Height), 18);
+        form.Region = new Region(path);
+    }
+    public static Button CreateSwapButton()
+    {
+        var button = new Button { Text = "Swap", Size = new Size(160, 40), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(55, 46, 16), ForeColor = SwitchColor, Font = new Font("Segoe UI", SwapFontSize, FontStyle.Bold), UseCompatibleTextRendering = true, Cursor = Cursors.Hand };
+        button.FlatAppearance.BorderColor = SwitchColor;
+        button.FlatAppearance.BorderSize = 1;
+        return button;
+    }
+    private static GraphicsPath RoundedPath(RectangleF bounds, float radius)
+    {
+        var path = new GraphicsPath();
+        var diameter = radius * 2;
+        path.AddArc(bounds.X, bounds.Y, diameter, diameter, 180, 90);
+        path.AddArc(bounds.Right - diameter, bounds.Y, diameter, diameter, 270, 90);
+        path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
+        path.AddArc(bounds.X, bounds.Bottom - diameter, diameter, diameter, 90, 90);
+        path.CloseFigure();
+        return path;
     }
 }
 
@@ -392,7 +483,9 @@ internal sealed class GraphForm : Form
     {
         ShowInTaskbar = false;
         base.OnLoad(e);
+        UiIcons.ApplyRoundedCorners(this);
     }
+    protected override void OnResize(EventArgs e) { base.OnResize(e); UiIcons.ApplyRoundedCorners(this); }
     protected override void SetVisibleCore(bool value)
     {
         ShowInTaskbar = false;
@@ -406,8 +499,8 @@ internal sealed class GraphForm : Form
         if (footer != null && swap != null)
         {
             footer.Height = 136;
-            swap.Size = new Size(144, 34);
-            swap.Location = new Point((footer.ClientSize.Width - swap.Width) / 2, 92);
+            swap.Size = new Size(160, 40);
+            swap.Location = new Point((footer.ClientSize.Width - swap.Width) / 2, 89);
         }
     }
     public void SetResetData(ResetData? data) { resetChanceValue.Text = data == null ? "Reset chance: unavailable" : $"Next reset chance: {data.ChancePercent}% (48h)"; var latest = data?.Events.OrderByDescending(x => x.AnnouncedAt).FirstOrDefault(); lastResetValue.Text = latest == null ? "Last reset: unavailable" : $"Days since last reset: {Math.Max(0, (DateTimeOffset.UtcNow - latest.AnnouncedAt).TotalDays):0.0}"; canvas.ResetEvents = data?.Events ?? []; canvas.Invalidate(); }
@@ -443,7 +536,7 @@ internal sealed class GraphForm : Form
         var area = Screen.GetWorkingArea(Cursor.Position);
         Height = Math.Min(Height, Math.Max(MinimumSize.Height, area.Height - 16));
         Width = Math.Min(Width, Math.Max(MinimumSize.Width, area.Width - 16));
-        Location = new Point(Math.Max(area.Left, area.Right - Width - 8), Math.Max(area.Top, area.Bottom - Height - 8));
+        Location = new Point(Math.Max(area.Left, area.Right - Width - 8), Math.Max(area.Top, area.Bottom - Height));
     }
 }
 
