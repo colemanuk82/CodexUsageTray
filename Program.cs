@@ -80,7 +80,7 @@ internal static class Brushes
 
 internal sealed class TrayContext : ApplicationContext
 {
-    private static readonly Version CurrentVersion = new(2, 0, 5);
+    private static readonly Version CurrentVersion = new(2, 0, 6);
     private readonly NotifyIcon tray;
     private readonly UsageClient client = new();
     private readonly ResetDataClient resetClient = new();
@@ -100,6 +100,7 @@ internal sealed class TrayContext : ApplicationContext
     public TrayContext()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(stateFile)!);
+        graphDays = LoadGraphDays();
         ThemeManager.Load();
         resetData = resetClient.LoadCached();
         if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("CodexUsageTray") is string) SetStartup(true);
@@ -180,7 +181,7 @@ internal sealed class TrayContext : ApplicationContext
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
     }
     private void SetRefreshMinutes(int minutes) { refreshMinutes = minutes; refreshTimer.Interval = minutes * 60 * 1000; graph?.SetOptions(refreshMinutes, graphDays); analytics?.SetRefreshMinutes(refreshMinutes); }
-    private void SetGraphDays(int days) { graphDays = days; graph?.SetOptions(refreshMinutes, graphDays); }
+    private void SetGraphDays(int days) { graphDays = days; SaveGraphDays(); graph?.SetOptions(refreshMinutes, graphDays); analytics?.SetGraphDays(graphDays); }
     private void SetTheme(ThemePalette theme)
     {
         ThemeManager.Set(theme);
@@ -233,7 +234,7 @@ internal sealed class TrayContext : ApplicationContext
     {
         if (graph != null && !graph.IsDisposed) graph.Close();
         if (analytics != null && !analytics.IsDisposed) { if (analytics.WindowState == FormWindowState.Minimized) analytics.WindowState = FormWindowState.Normal; analytics.PlaceAboveTray(); analytics.BringToFront(); analytics.Activate(); return; }
-        analytics = new AnalyticsForm(ShowGraph, refreshMinutes, SetRefreshMinutes); ThemeManager.ApplyTo(analytics); analytics.FormClosed += (_, _) => analytics = null; analytics.Show(); analytics.PlaceAboveTray(); analytics.Activate();
+        analytics = new AnalyticsForm(ShowGraph, refreshMinutes, SetRefreshMinutes); analytics.SetGraphState(graphDays, SetGraphDays); ThemeManager.ApplyTo(analytics); analytics.FormClosed += (_, _) => analytics = null; analytics.Show(); analytics.PlaceAboveTray(); analytics.Activate();
     }
 
     private static string StartupPath => Environment.ProcessPath ?? Application.ExecutablePath;
@@ -254,8 +255,10 @@ internal sealed class TrayContext : ApplicationContext
     private void SaveSnapshot(UsageSnapshot s)
     {
         var all = ReadSnapshots(); all.Add(s); all = all.Where(x => x.At >= DateTimeOffset.UtcNow.AddDays(-31)).ToList();
-        File.WriteAllText(stateFile, JsonSerializer.Serialize(new State { History = all }));
+        File.WriteAllText(stateFile, JsonSerializer.Serialize(new State { History = all, GraphDays = graphDays }));
     }
+    private int LoadGraphDays() { try { return Math.Clamp(JsonSerializer.Deserialize<State>(File.ReadAllText(stateFile))?.GraphDays ?? 7, 1, 30); } catch { return 7; } }
+    private void SaveGraphDays() { File.WriteAllText(stateFile, JsonSerializer.Serialize(new State { History = ReadSnapshots(), GraphDays = graphDays })); }
     private List<UsageSnapshot> ReadSnapshots()
     {
         try { return JsonSerializer.Deserialize<State>(File.ReadAllText(stateFile))?.History ?? []; } catch { return []; }
@@ -353,7 +356,7 @@ internal sealed class UpdateChecker
 }
 
 internal record UsageSnapshot(DateTimeOffset At, double SessionRemaining, double WeeklyRemaining, DateTimeOffset? SessionResetAt = null, DateTimeOffset? WeeklyResetAt = null);
-internal sealed class State { public bool Bars { get; set; } public List<UsageSnapshot> History { get; set; } = []; }
+internal sealed class State { public bool Bars { get; set; } public int GraphDays { get; set; } = 7; public List<UsageSnapshot> History { get; set; } = []; }
 
 internal sealed class CodexUsageRecord
 {
@@ -448,12 +451,15 @@ internal sealed class AnalyticsDashboard : Panel
 }
 internal sealed class AnalyticsForm : Form
 {
+    private Action<int>? graphChanged;
     private readonly CodexAnalyticsStore store = new(); private readonly AnalyticsDashboard dashboard = new(); private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 60_000 }; private readonly Action<int> refreshChanged; private List<CodexUsageRecord> all = []; private bool refreshing; private int graphDays = 30; private int refreshMinutes = 1;
     public AnalyticsForm(Action showLimits, int refreshMinutes, Action<int> refreshChanged)
     {
         this.refreshMinutes = refreshMinutes; this.refreshChanged = refreshChanged; refreshTimer.Interval = refreshMinutes * 60_000; Text = "Codex usage"; ClientSize = new Size(1000, 1320); MinimumSize = new Size(900, 1140); StartPosition = FormStartPosition.Manual; FormBorderStyle = FormBorderStyle.None; AutoScaleMode = AutoScaleMode.None; KeyPreview = true; BackColor = Color.Black; KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) Close(); }; dashboard.Dock = DockStyle.Fill; dashboard.GraphRangeClicked += () => { graphDays = graphDays == 1 ? 7 : graphDays == 7 ? 30 : 1; Render(); }; dashboard.RefreshClicked += () => refreshChanged(refreshMinutes == 1 ? 5 : 1); dashboard.LimitsClicked += () => { Close(); showLimits(); }; Controls.Add(dashboard); refreshTimer.Tick += async (_, _) => await RefreshAsync(); Load += async (_, _) => { await RefreshAsync(); refreshTimer.Start(); }; FormClosed += (_, _) => refreshTimer.Dispose();
     }
     public void SetRefreshMinutes(int minutes) { refreshMinutes = minutes; refreshTimer.Interval = minutes * 60_000; dashboard.RefreshMinutes = minutes; dashboard.Invalidate(); }
+    public void SetGraphState(int days, Action<int> changed) { graphDays = days; graphChanged = changed; dashboard.GraphRangeClicked += () => graphChanged?.Invoke(graphDays); Render(); }
+    public void SetGraphDays(int days) { graphDays = days; Render(); }
     protected override CreateParams CreateParams { get { var parameters = base.CreateParams; parameters.ExStyle |= 0x80; return parameters; } }
     protected override void OnLoad(EventArgs e)
     {
