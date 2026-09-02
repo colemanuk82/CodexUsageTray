@@ -103,6 +103,10 @@ All usage processing and history storage are local to the Windows machine. The a
 - .NET 8 desktop runtime when using the framework-dependent build.
 - An existing Codex CLI installation and authenticated Codex session.
 
+## Installation
+
+Download `CodexUsageTray-v2.0.2-Setup.exe` from the [GitHub release](https://github.com/colemanuk82/CodexUsageTray/releases/tag/v2.0.2) and run it. The installer installs the current Release build for the signed-in Windows user under `%LOCALAPPDATA%\\CodexUsageTray`, replaces an older running copy, and launches the tray icon.
+
 ## Build
 
 ```powershell
