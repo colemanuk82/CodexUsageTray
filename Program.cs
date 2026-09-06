@@ -127,7 +127,7 @@ internal static class Brushes
 
 internal sealed class TrayContext : ApplicationContext
 {
-    private static readonly Version CurrentVersion = new(2, 0, 10);
+    private static readonly Version CurrentVersion = new(2, 0, 11);
     private readonly NotifyIcon tray;
     private readonly UsageClient client = new();
     private readonly ResetDataClient resetClient = new();
@@ -164,7 +164,7 @@ internal sealed class TrayContext : ApplicationContext
         refreshTimer = new System.Windows.Forms.Timer { Interval = refreshMinutes * 60 * 1000 };
         refreshTimer.Tick += async (_, _) => await RefreshAsync();
         refreshTimer.Start();
-        resetTimer = new System.Windows.Forms.Timer { Interval = 60 * 60 * 1000 };
+        resetTimer = new System.Windows.Forms.Timer { Interval = 15 * 60 * 1000 };
         resetTimer.Tick += async (_, _) => await RefreshResetDataAsync();
         resetTimer.Start();
         updateTimer = new System.Windows.Forms.Timer { Interval = 24 * 60 * 60 * 1000 };
@@ -245,7 +245,7 @@ internal sealed class TrayContext : ApplicationContext
     }
     private async Task RefreshResetDataAsync()
     {
-        try { if (resetData != null && DateTimeOffset.UtcNow - resetData.FetchedAt < TimeSpan.FromHours(1)) { UpdateIcon(); if (graph != null && !graph.IsDisposed) graph.SetResetData(resetData); return; } resetData = await resetClient.GetAsync(); UpdateIcon(); if (graph != null && !graph.IsDisposed) graph.SetResetData(resetData); }
+        try { if (resetData != null && DateTimeOffset.UtcNow - resetData.FetchedAt < TimeSpan.FromMinutes(15)) { UpdateIcon(); if (graph != null && !graph.IsDisposed) graph.SetResetData(resetData); return; } resetData = await resetClient.GetAsync(); UpdateIcon(); if (graph != null && !graph.IsDisposed) graph.SetResetData(resetData); }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
     }
     private void SetRefreshMinutes(int minutes) { refreshMinutes = minutes; refreshTimer.Interval = minutes * 60 * 1000; graph?.SetOptions(refreshMinutes, graphDays); analytics?.SetRefreshMinutes(refreshMinutes); }
@@ -603,7 +603,7 @@ internal sealed class AnalyticsForm : Form
     public void PlaceAboveTray(Point anchor) => UiIcons.PlaceAboveTray(this, anchor);
 }
 
-internal sealed class ResetData { public int ChancePercent { get; set; } public DateTimeOffset FetchedAt { get; set; } public List<ResetEvent> Events { get; set; } = []; }
+internal sealed class ResetData { public int ChancePercent { get; set; } public int ApiChancePercent { get; set; } public DateTimeOffset FetchedAt { get; set; } public List<ResetEvent> Events { get; set; } = []; }
 internal sealed class ResetEvent { [JsonPropertyName("reset_type")] public string ResetType { get; set; } = "regular"; [JsonPropertyName("announced_at")] public DateTimeOffset AnnouncedAt { get; set; } }
 internal sealed class ResetDataClient
 {
@@ -614,10 +614,34 @@ internal sealed class ResetDataClient
     {
         var status = await http.GetFromJsonAsync<StatusEnvelope>("https://codex-reset.today/api/v1/status", json) ?? new StatusEnvelope();
         var history = await http.GetFromJsonAsync<HistoryEnvelope>("https://codex-reset.today/api/v1/resets?limit=100&order=desc", json) ?? new HistoryEnvelope();
-        var result = new ResetData { ChancePercent = Math.Clamp(status.Data?.NextResetEstimate?.ChancePercent ?? 0, 0, 100), FetchedAt = DateTimeOffset.UtcNow, Events = history.Data ?? [] };
+        var apiChance = Math.Clamp(status.Data?.NextResetEstimate?.ChancePercent ?? 0, 0, 100);
+        var events = history.Data ?? [];
+        var historyChance = EstimateHistoricalChance(events);
+        var result = new ResetData { ChancePercent = Math.Max(apiChance, historyChance), ApiChancePercent = apiChance, FetchedAt = DateTimeOffset.UtcNow, Events = events };
         Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!); File.WriteAllText(CachePath, JsonSerializer.Serialize(result, json)); return result;
     }
-    public ResetData? LoadCached() { try { return JsonSerializer.Deserialize<ResetData>(File.ReadAllText(CachePath), json); } catch { return null; } }
+    private static int EstimateHistoricalChance(List<ResetEvent> events)
+    {
+        var regular = events.Where(x => x.ResetType.Equals("regular", StringComparison.OrdinalIgnoreCase)).OrderBy(x => x.AnnouncedAt).ToList();
+        if (regular.Count < 4) return 0;
+        var intervals = regular.Zip(regular.Skip(1), (previous, current) => (current.AnnouncedAt - previous.AnnouncedAt).TotalHours).Where(x => x > 0).ToList();
+        if (intervals.Count < 3) return 0;
+        var elapsed = Math.Max(0, (DateTimeOffset.UtcNow - regular[^1].AnnouncedAt).TotalHours);
+        var matches = intervals.Count(x => x >= elapsed && x <= elapsed + 48);
+        return Math.Clamp((int)Math.Round(matches * 100d / intervals.Count), 0, 100);
+    }
+    public ResetData? LoadCached()
+    {
+        try
+        {
+            var data = JsonSerializer.Deserialize<ResetData>(File.ReadAllText(CachePath), json);
+            if (data == null) return null;
+            if (data.ApiChancePercent == 0 && data.ChancePercent > 0) data.ApiChancePercent = data.ChancePercent;
+            data.ChancePercent = Math.Max(data.ApiChancePercent, EstimateHistoricalChance(data.Events));
+            return data;
+        }
+        catch { return null; }
+    }
     private sealed class StatusEnvelope { public StatusData? Data { get; set; } }
     private sealed class StatusData { [JsonPropertyName("next_reset_estimate")] public Forecast? NextResetEstimate { get; set; } }
     private sealed class Forecast { [JsonPropertyName("chance_percent")] public int ChancePercent { get; set; } }
