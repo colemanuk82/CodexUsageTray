@@ -35,7 +35,6 @@ internal static class Program
         }
     }
 }
-
 internal static class AppLog
 {
     private static readonly object Sync = new();
@@ -64,7 +63,7 @@ internal sealed record ThemePalette(string Name, Color Background, Color Panel, 
 internal static class ThemeManager
 {
     private static readonly string Path = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexUsageTray", "theme.txt");
-    public static readonly ThemePalette Default = new("Default", Color.Black, Color.FromArgb(24, 25, 29), Color.White, Color.LightSteelBlue, Color.FromArgb(45, 155, 255), Color.FromArgb(55, 225, 95), Color.FromArgb(255, 165, 55), Color.FromArgb(55, 46, 16), Color.FromArgb(255, 210, 70));
+    public static readonly ThemePalette Default = new("Default", Color.FromArgb(17, 21, 29), Color.FromArgb(27, 34, 46), Color.FromArgb(241, 245, 249), Color.FromArgb(174, 188, 207), Color.FromArgb(45, 155, 255), Color.FromArgb(55, 225, 95), Color.FromArgb(255, 165, 55), Color.FromArgb(55, 46, 16), Color.FromArgb(255, 210, 70));
     public static readonly IReadOnlyList<ThemePalette> Themes =
     [
         Default,
@@ -91,18 +90,26 @@ internal static class ThemeManager
     public static void ApplyTo(Form form)
     {
         form.BackColor = Current.Background;
-        form.Opacity = Current.Name == "Glass" ? 0.9 : 1.0;
+        form.Opacity = Current.Name == "Glass" ? 0.97 : 1.0;
         ApplyToControl(form, Current);
+        form.Invalidate(true);
     }
     private static void ApplyToControl(Control control, ThemePalette theme)
     {
         if (control is Form) control.BackColor = theme.Background;
         else if (control is GraphCanvas or AnalyticsChart or AnalyticsDashboard) control.BackColor = theme.Panel;
         else if (control is Panel panel && (panel.Dock == DockStyle.Top || panel.Dock == DockStyle.Bottom)) control.BackColor = theme.Background;
-        if (control is Label label) label.ForeColor = theme.Text;
+        if (control is Label label) label.ForeColor = label.Cursor == Cursors.Hand ? theme.Accent : theme.Text;
+        if (control.Tag is string role)
+        {
+            if (role == "weekly") control.BackColor = theme.Good;
+            else if (role == "session") control.BackColor = theme.Accent;
+            else if (role == "track") control.BackColor = theme.Panel;
+            else if (role == "muted") control.ForeColor = theme.Muted;
+        }
         if (control is Button button)
         {
-            button.BackColor = theme.SwapBackground; button.ForeColor = theme.Swap; button.FlatAppearance.BorderColor = theme.Swap;
+            button.BackColor = theme.SwapBackground; button.ForeColor = theme.Swap; button.FlatAppearance.BorderColor = theme.Accent; button.BackColor = theme.Panel; button.ForeColor = theme.Accent; button.FlatAppearance.MouseOverBackColor = theme.Background;
         }
         foreach (Control child in control.Controls) ApplyToControl(child, theme);
     }
@@ -120,7 +127,7 @@ internal static class Brushes
 
 internal sealed class TrayContext : ApplicationContext
 {
-    private static readonly Version CurrentVersion = new(2, 0, 8);
+    private static readonly Version CurrentVersion = new(2, 0, 9);
     private readonly NotifyIcon tray;
     private readonly UsageClient client = new();
     private readonly ResetDataClient resetClient = new();
@@ -135,12 +142,15 @@ internal sealed class TrayContext : ApplicationContext
     private readonly UpdateChecker updateChecker = new();
     private int refreshMinutes = 1;
     private int graphDays = 7;
+    private int popoutScalePercent;
     private ResetData? resetData;
+    private Point? popoutAnchor;
 
     public TrayContext()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(stateFile)!);
         graphDays = LoadGraphDays();
+        popoutScalePercent = LoadPopoutScale();
         ThemeManager.Load();
         resetData = resetClient.LoadCached();
         try
@@ -149,7 +159,7 @@ internal sealed class TrayContext : ApplicationContext
         }
         catch (Exception ex) { AppLog.Write("Startup registration", ex); }
         tray = new NotifyIcon { Visible = true, Text = "Codex usage", Icon = MakeIcon(null) };
-        tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) TogglePopout(); };
+        tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) { popoutAnchor = Cursor.Position; TogglePopout(); } };
         tray.ContextMenuStrip = Menu();
         refreshTimer = new System.Windows.Forms.Timer { Interval = refreshMinutes * 60 * 1000 };
         refreshTimer.Tick += async (_, _) => await RefreshAsync();
@@ -163,13 +173,19 @@ internal sealed class TrayContext : ApplicationContext
         _ = RefreshAsync();
         _ = RefreshResetDataAsync();
         _ = CheckForUpdatesAsync(false);
+        if (Environment.GetCommandLineArgs().Contains("--show-usage"))
+        {
+            var openUsage = new System.Windows.Forms.Timer { Interval = 250 };
+            openUsage.Tick += (_, _) => { openUsage.Stop(); openUsage.Dispose(); ShowAnalytics(); };
+            openUsage.Start();
+        }
     }
 
     private ContextMenuStrip Menu()
     {
         var m = new ContextMenuStrip();
-        m.Items.Add("Open Codex limits", null, (_, _) => ShowGraph());
-        m.Items.Add("Open Codex usage", null, (_, _) => ShowAnalytics());
+        m.Items.Add("Open Codex limits", null, (_, _) => { popoutAnchor = Cursor.Position; ShowGraph(); });
+        m.Items.Add("Open Codex usage", null, (_, _) => { popoutAnchor = Cursor.Position; ShowAnalytics(); });
         m.Items.Add("Refresh now", null, async (_, _) => await RefreshAsync());
         m.Items.Add("Check for updates", null, async (_, _) => await CheckForUpdatesAsync(true));
         m.Items.Add("GitHub repository", null, (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("https://github.com/colemanuk82/CodexUsageTray") { UseShellExecute = true }));
@@ -189,6 +205,14 @@ internal sealed class TrayContext : ApplicationContext
             durationMenu.DropDownItems.Add(item);
         }
         m.Items.Add(durationMenu);
+        var sizeMenu = new ToolStripMenuItem("Popout size");
+        foreach (var percent in Enumerable.Range(10, 11).Select(x => x * 10))
+        {
+            var item = new ToolStripMenuItem($"{percent}%") { Checked = popoutScalePercent == percent };
+            item.Click += (_, _) => SetPopoutScale(percent);
+            sizeMenu.DropDownItems.Add(item);
+        }
+        m.Items.Add(sizeMenu);
         var themeMenu = new ToolStripMenuItem("Theme");
         foreach (var theme in ThemeManager.Themes)
         {
@@ -226,6 +250,14 @@ internal sealed class TrayContext : ApplicationContext
     }
     private void SetRefreshMinutes(int minutes) { refreshMinutes = minutes; refreshTimer.Interval = minutes * 60 * 1000; graph?.SetOptions(refreshMinutes, graphDays); analytics?.SetRefreshMinutes(refreshMinutes); }
     private void SetGraphDays(int days) { graphDays = days; try { SaveGraphDays(); } catch (Exception ex) { AppLog.Write("Save graph settings", ex); } graph?.SetOptions(refreshMinutes, graphDays); analytics?.SetGraphDays(graphDays); }
+    private void SetPopoutScale(int percent)
+    {
+        popoutScalePercent = Math.Clamp(percent, 100, 200);
+        try { SavePopoutScale(); } catch (Exception ex) { AppLog.Write("Save popout size", ex); }
+        graph?.SetPopoutScale(popoutScalePercent, popoutAnchor ?? Cursor.Position);
+        analytics?.SetPopoutScale(popoutScalePercent, popoutAnchor ?? Cursor.Position);
+        tray.ContextMenuStrip = Menu();
+    }
     private void SetTheme(ThemePalette theme)
     {
         try
@@ -260,17 +292,19 @@ internal sealed class TrayContext : ApplicationContext
 
     private void ShowGraph()
     {
+        popoutAnchor ??= Cursor.Position;
         if (analytics != null && !analytics.IsDisposed) analytics.Close();
         if (latest == null) { _ = RefreshAsync(); return; }
         if (graph != null && !graph.IsDisposed)
         {
             if (graph.WindowState == FormWindowState.Minimized) graph.WindowState = FormWindowState.Normal;
-            graph.UpdateData(latest, ReadSnapshots()); graph.SetOptions(refreshMinutes, graphDays); graph.SetResetData(resetData); ThemeManager.ApplyTo(graph); graph.PlaceAboveTray(); graph.BringToFront(); graph.Activate(); return;
+            graph.UpdateData(latest, ReadSnapshots()); graph.SetOptions(refreshMinutes, graphDays); graph.SetResetData(resetData); ThemeManager.ApplyTo(graph); graph.PlaceAboveTray(popoutAnchor!.Value); graph.BringToFront(); graph.Activate(); return;
         }
         graph = new GraphForm(latest, ReadSnapshots(), refreshMinutes, graphDays, SetRefreshMinutes, SetGraphDays, resetData, ShowAnalytics);
+        graph.SetPopoutScale(popoutScalePercent, popoutAnchor!.Value);
         ThemeManager.ApplyTo(graph);
         graph.FormClosed += (_, _) => graph = null;
-        graph.Show(); graph.PlaceAboveTray(); graph.Activate();
+        graph.Show(); graph.PlaceAboveTray(popoutAnchor!.Value); graph.Activate();
     }
     private void TogglePopout()
     {
@@ -280,9 +314,10 @@ internal sealed class TrayContext : ApplicationContext
     }
     private void ShowAnalytics()
     {
+        popoutAnchor ??= Cursor.Position;
         if (graph != null && !graph.IsDisposed) graph.Close();
-        if (analytics != null && !analytics.IsDisposed) { if (analytics.WindowState == FormWindowState.Minimized) analytics.WindowState = FormWindowState.Normal; analytics.PlaceAboveTray(); analytics.BringToFront(); analytics.Activate(); return; }
-        analytics = new AnalyticsForm(ShowGraph, refreshMinutes, SetRefreshMinutes); analytics.SetGraphState(graphDays, SetGraphDays); ThemeManager.ApplyTo(analytics); analytics.FormClosed += (_, _) => analytics = null; analytics.Show(); analytics.PlaceAboveTray(); analytics.Activate();
+        if (analytics != null && !analytics.IsDisposed) { if (analytics.WindowState == FormWindowState.Minimized) analytics.WindowState = FormWindowState.Normal; analytics.PlaceAboveTray(popoutAnchor!.Value); analytics.BringToFront(); analytics.Activate(); return; }
+        analytics = new AnalyticsForm(ShowGraph, refreshMinutes, SetRefreshMinutes); analytics.SetGraphState(graphDays, SetGraphDays); analytics.SetPopoutScale(popoutScalePercent, popoutAnchor!.Value); ThemeManager.ApplyTo(analytics); analytics.FormClosed += (_, _) => analytics = null; analytics.Show(); analytics.PlaceAboveTray(popoutAnchor!.Value); analytics.Activate();
     }
 
     private static string StartupPath => Environment.ProcessPath ?? Application.ExecutablePath;
@@ -303,10 +338,12 @@ internal sealed class TrayContext : ApplicationContext
     private void SaveSnapshot(UsageSnapshot s)
     {
         var all = ReadSnapshots(); all.Add(s); all = all.Where(x => x.At >= DateTimeOffset.UtcNow.AddDays(-31)).ToList();
-        File.WriteAllText(stateFile, JsonSerializer.Serialize(new State { History = all, GraphDays = graphDays }));
+        File.WriteAllText(stateFile, JsonSerializer.Serialize(new State { History = all, GraphDays = graphDays, PopoutScalePercent = popoutScalePercent }));
     }
     private int LoadGraphDays() { try { return Math.Clamp(JsonSerializer.Deserialize<State>(File.ReadAllText(stateFile))?.GraphDays ?? 7, 1, 30); } catch { return 7; } }
-    private void SaveGraphDays() { File.WriteAllText(stateFile, JsonSerializer.Serialize(new State { History = ReadSnapshots(), GraphDays = graphDays })); }
+    private void SaveGraphDays() { File.WriteAllText(stateFile, JsonSerializer.Serialize(new State { History = ReadSnapshots(), GraphDays = graphDays, PopoutScalePercent = popoutScalePercent })); }
+    private int LoadPopoutScale() { try { return Math.Clamp(JsonSerializer.Deserialize<State>(File.ReadAllText(stateFile))?.PopoutScalePercent ?? 100, 100, 200); } catch { return 100; } }
+    private void SavePopoutScale() { File.WriteAllText(stateFile, JsonSerializer.Serialize(new State { History = ReadSnapshots(), GraphDays = graphDays, PopoutScalePercent = popoutScalePercent })); }
     private List<UsageSnapshot> ReadSnapshots()
     {
         try { return JsonSerializer.Deserialize<State>(File.ReadAllText(stateFile))?.History ?? []; } catch { return []; }
@@ -404,7 +441,7 @@ internal sealed class UpdateChecker
 }
 
 internal record UsageSnapshot(DateTimeOffset At, double SessionRemaining, double WeeklyRemaining, DateTimeOffset? SessionResetAt = null, DateTimeOffset? WeeklyResetAt = null);
-internal sealed class State { public bool Bars { get; set; } public int GraphDays { get; set; } = 7; public List<UsageSnapshot> History { get; set; } = []; }
+internal sealed class State { public bool Bars { get; set; } public int GraphDays { get; set; } = 7; public int PopoutScalePercent { get; set; } = 100; public List<UsageSnapshot> History { get; set; } = []; }
 
 internal sealed class CodexUsageRecord
 {
@@ -462,7 +499,7 @@ internal sealed class AnalyticsChart : Panel
     public List<CodexUsageRecord> Records { get; set; } = []; public int Days { get; set; } = 30; public DateTime StartDate { get; set; } = DateTime.Today.AddDays(-29);
     public AnalyticsChart() { BackColor = Color.FromArgb(24, 25, 29); DoubleBuffered = true; }
     protected override void OnPaint(PaintEventArgs e)
-    { base.OnPaint(e); e.Graphics.Clear(BackColor); var left = 90; var top = 76; var right = Math.Max(left + 100, Width - 38); var bottom = Math.Max(top + 100, Height - 62); var start = StartDate.Date; var daily = Enumerable.Range(0, Days).Select(i => Records.Where(x => x.At.ToLocalTime().Date == start.AddDays(i)).Sum(x => x.TotalTokens)).ToList(); var max = Math.Max(1, daily.Max()); using var grid = new Pen(Color.FromArgb(50, 55, 62)); using var text = new SolidBrush(Color.FromArgb(180, 190, 205)); using var font = new Font("Segoe UI", 18, FontStyle.Regular, GraphicsUnit.Pixel); for (var i = 0; i <= 4; i++) { var y = top + i * (bottom - top) / 4; e.Graphics.DrawLine(grid, left, y, right, y); e.Graphics.DrawString($"{max * (4 - i) / 4 / 1000000d:0.#}M", font, text, 22, y - 10); } using var barBrush = new SolidBrush(Color.FromArgb(55, 225, 95)); var slot = (right - left) / (float)Math.Max(1, Days); for (var i = 0; i < daily.Count; i++) { var h = (float)(daily[i] / max * (bottom - top)); e.Graphics.FillRectangle(barBrush, left + i * slot + 2, bottom - h, Math.Max(3, slot - 5), h); } using var heading = new Font("Segoe UI", 32, FontStyle.Bold, GraphicsUnit.Pixel); e.Graphics.DrawString("Daily Codex usage", heading, Brushes.White, 34, 22); e.Graphics.DrawString(start.ToString("dd MMM"), font, text, left, bottom + 14); var endLabel = (start.AddDays(Days - 1)).ToString("dd MMM"); var endSize = e.Graphics.MeasureString(endLabel, font); e.Graphics.DrawString(endLabel, font, text, right - endSize.Width, bottom + 14); }
+    { base.OnPaint(e); e.Graphics.Clear(BackColor); var left = 90; var top = 76; var right = Math.Max(left + 100, Width - 38); var bottom = Math.Max(top + 100, Height - 62); var start = StartDate.Date; var daily = Enumerable.Range(0, Days).Select(i => Records.Where(x => x.At.ToLocalTime().Date == start.AddDays(i)).Sum(x => x.TotalTokens)).ToList(); var max = Math.Max(1, daily.Max()); using var grid = new Pen(Color.FromArgb(50, 55, 62)); using var text = new SolidBrush(Color.FromArgb(180, 190, 205)); using var font = new Font("Segoe UI", 18, FontStyle.Regular, GraphicsUnit.Pixel); for (var i = 0; i <= 4; i++) { var y = top + i * (bottom - top) / 4; e.Graphics.DrawLine(grid, left, y, right, y); e.Graphics.DrawString($"{max * (4 - i) / 4 / 1000000d:0.#}M", font, text, 22, y - 10); } using var barBrush = new SolidBrush(ThemeManager.Current.Good); var slot = (right - left) / (float)Math.Max(1, Days); for (var i = 0; i < daily.Count; i++) { var h = (float)(daily[i] / max * (bottom - top)); e.Graphics.FillRectangle(barBrush, left + i * slot + 2, bottom - h, Math.Max(3, slot - 5), h); } using var heading = new Font("Segoe UI", 32, FontStyle.Bold, GraphicsUnit.Pixel); e.Graphics.DrawString("Daily Codex usage", heading, Brushes.White, 34, 22); e.Graphics.DrawString(start.ToString("dd MMM"), font, text, left, bottom + 14); var endLabel = (start.AddDays(Days - 1)).ToString("dd MMM"); var endSize = e.Graphics.MeasureString(endLabel, font); e.Graphics.DrawString(endLabel, font, text, right - endSize.Width, bottom + 14); }
 }
 internal sealed class ModelRate { public decimal Input { get; set; } public decimal Cached { get; set; } public decimal Output { get; set; } }
 internal sealed class ModelRateCache { public DateTimeOffset FetchedAt { get; set; } public Dictionary<string, ModelRate> Rates { get; set; } = []; }
@@ -507,35 +544,31 @@ internal sealed class AnalyticsBreakdownPanel : Panel
         e.Graphics.DrawString("Predicted API cost", heading, Brushes.White, right.X + 22, right.Y + 18); y = right.Y + 64; var estimate = 0m; foreach (var group in groups.Take(4)) { var cost = ModelCostEstimator.Estimate(group); estimate += cost; using var dot = new SolidBrush(ModelCostEstimator.ColorFor(group.Key)); e.Graphics.FillEllipse(dot, right.X + 24, y + 5, 14, 14); e.Graphics.DrawString(group.Key, text, Brushes.White, right.X + 48, y); e.Graphics.DrawString(cost == 0 ? "Rate unavailable" : $"≈ ${cost:N2}", text, muted, right.X + 48, y + 25); y += 64; } e.Graphics.DrawLine(line, right.X + 22, Math.Min(right.Bottom - 54, y + 4), right.Right - 22, Math.Min(right.Bottom - 54, y + 4)); e.Graphics.DrawString("Estimated total", heading, Brushes.White, right.X + 22, Math.Min(right.Bottom - 42, y + 16)); e.Graphics.DrawString($"≈ ${estimate:N2}", heading, Brushes.White, right.Right - 150, Math.Min(right.Bottom - 42, y + 16));
     }
 }
-internal sealed class AnalyticsDashboard : Panel
-{
-    private readonly Button swapButton;
-    public List<CodexUsageRecord> Records { get; set; } = []; public int Days { get; set; } = 30; public int RefreshMinutes { get; set; } = 1; public DateTime StartDate { get; set; } = DateTime.Today.AddDays(-29); public event Action? GraphRangeClicked; public event Action? RefreshClicked; public event Action? LimitsClicked; private RectangleF rangeHit; private RectangleF refreshHit; private RectangleF limitsHit;
-    public AnalyticsDashboard() { BackColor = Color.Black; DoubleBuffered = true; swapButton = UiIcons.CreateSwapButton(); swapButton.Click += (_, _) => LimitsClicked?.Invoke(); Controls.Add(swapButton); PositionSwapButton(); Resize += (_, _) => PositionSwapButton(); MouseClick += (_, e) => { const float scale = 1.452f; var point = new PointF(e.X / scale, e.Y / scale); if (rangeHit.Contains(point)) GraphRangeClicked?.Invoke(); else if (refreshHit.Contains(point)) RefreshClicked?.Invoke(); else if (limitsHit.Contains(point)) LimitsClicked?.Invoke(); }; }
-    private void PositionSwapButton() { swapButton.Location = new Point((ClientSize.Width - swapButton.Width) / 2, Math.Max(0, ClientSize.Height - 77)); }
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        base.OnPaint(e); e.Graphics.Clear(BackColor); const float scale = 1.452f; e.Graphics.ScaleTransform(scale, scale); var displayWidth = Width / scale; var displayHeight = Height / scale; var records = Records; var total = records.Sum(x => x.TotalTokens); var calls = records.Count; var sessions = records.Select(x => x.SessionId).Distinct().Count(); var cached = records.Sum(x => x.CachedInputTokens); var groups = records.GroupBy(x => ModelCostEstimator.DisplayModel(x.Model)).OrderByDescending(g => g.Sum(x => x.TotalTokens)).ToList();
-        using var title = new Font("Segoe UI", 38, FontStyle.Bold, GraphicsUnit.Pixel); using var metric = new Font("Segoe UI", 28, FontStyle.Bold, GraphicsUnit.Pixel); using var normal = new Font("Segoe UI", 23, FontStyle.Bold, GraphicsUnit.Pixel); using var section = new Font("Segoe UI", 30, FontStyle.Bold, GraphicsUnit.Pixel); using var label = new Font("Segoe UI", 27, FontStyle.Bold, GraphicsUnit.Pixel); using var average = new Font("Segoe UI", 37, FontStyle.Bold, GraphicsUnit.Pixel); using var muted = new SolidBrush(ThemeManager.Current.Muted); using var grid = new Pen(Color.FromArgb(56, 62, 72)); using var green = new SolidBrush(ThemeManager.Current.Good);
-        e.Graphics.DrawString("Codex usage", title, Brushes.White, 48, 36); e.Graphics.DrawString($"{FormatTokens(total)} tokens", metric, Brushes.White, 48, 105); e.Graphics.DrawString($"{FormatTokens(calls)} calls", metric, Brushes.White, 325, 105); e.Graphics.DrawString($"{FormatTokens(sessions)} sessions", metric, Brushes.White, 470, 105); e.Graphics.DrawString($"{FormatTokens(cached)} cached input tokens", metric, Brushes.White, 48, 148); e.Graphics.DrawString($"Avg/day: {FormatTokens((long)(total / (double)Math.Max(1, Days)))}", metric, Brushes.White, 48, 198);
-        var graphHeadingY = 290; var plotTop = 375; var left = 120; var right = displayWidth - 60; var bottom = 600; e.Graphics.DrawString("Daily Codex usage", section, Brushes.White, 48, graphHeadingY); var rangeLabel = $"Graph: {Days} day{(Days == 1 ? "" : "s")}"; var refreshLabel = $"Refresh: {RefreshMinutes} min"; var rangeSize = e.Graphics.MeasureString(rangeLabel, normal); var refreshSize = e.Graphics.MeasureString(refreshLabel, normal); var rangeX = right - rangeSize.Width; var refreshX = rangeX - refreshSize.Width - 28; using var control = new SolidBrush(Color.FromArgb(45, 155, 255)); e.Graphics.DrawString(refreshLabel, normal, control, refreshX, graphHeadingY + 6); e.Graphics.DrawString(rangeLabel, normal, control, rangeX, graphHeadingY + 6); refreshHit = new RectangleF(refreshX - 8, graphHeadingY - 2, refreshSize.Width + 16, normal.Height + 18); rangeHit = new RectangleF(rangeX - 8, graphHeadingY - 2, rangeSize.Width + 16, normal.Height + 18); var start = StartDate.Date; var bucketHours = Days == 1 ? 1 : Days == 7 ? 6 : 24; var bucketCount = Days * 24 / bucketHours; var daily = Enumerable.Range(0, bucketCount).Select(i => { var bucketStart = start.AddHours(i * bucketHours); var bucketEnd = bucketStart.AddHours(bucketHours); return records.Where(record => { var local = record.At.ToLocalTime(); return local >= bucketStart && local < bucketEnd; }).Sum(record => record.TotalTokens); }).ToList(); var runningTotal = 0L; daily = daily.Select(value => runningTotal += value).ToList(); var max = Math.Max(1, daily.Max()); for (var i = 0; i <= 4; i++) { var y = plotTop + i * (bottom - plotTop) / 4; e.Graphics.DrawLine(grid, left, y, right, y); e.Graphics.DrawString(FormatTokens(max * (4 - i) / 4), normal, muted, 28, y - 14); } var points = daily.Select((value, i) => new PointF(bucketCount == 1 ? (left + right) / 2f : left + i * (right - left) / (float)(bucketCount - 1), bottom - (float)(value / (double)max * (bottom - plotTop)))).ToList(); using var linePen = new Pen(Color.FromArgb(55, 225, 95), 3); for (var i = 1; i < points.Count; i++) e.Graphics.DrawLine(linePen, points[i - 1], points[i]); foreach (var point in points) e.Graphics.FillEllipse(green, point.X - 4, point.Y - 4, 8, 8); if (Days == 1) { for (var i = 0; i <= 4; i++) { var tickX = left + i * (right - left) / 4f; var tickLabel = start.AddHours(i * 6).ToString("HH:mm"); var labelSize = e.Graphics.MeasureString(tickLabel, normal); e.Graphics.DrawString(tickLabel, normal, muted, tickX - labelSize.Width / 2, bottom + 16); } } else { e.Graphics.DrawString(start.ToString("dd MMM"), normal, muted, left - 7, bottom + 16); var end = (start.AddDays(Days - 1)).ToString("dd MMM"); var endSize = e.Graphics.MeasureString(end, normal); e.Graphics.DrawString(end, normal, muted, right - endSize.Width, bottom + 16); }
-        var modelsTop = 700; e.Graphics.DrawString("Model usage", section, Brushes.White, 64, modelsTop); var barX = 64; var barY = modelsTop + 44; var barWidth = displayWidth - 128; var groupTotal = Math.Max(1, groups.Sum(g => g.Sum(x => x.TotalTokens))); var x = barX; foreach (var group in groups) { var width = (int)(barWidth * group.Sum(r => r.TotalTokens) / (double)groupTotal); using var brush = new SolidBrush(ModelCostEstimator.ColorFor(group.Key)); e.Graphics.FillRectangle(brush, x, barY, Math.Max(1, width), 24); x += width; }
-        var modelRows = Math.Max(1, (int)Math.Ceiling(groups.Count / 2d)); var modelRowStart = barY + 68; var modelColumnWidth = (displayWidth - 128) / 2; for (var i = 0; i < groups.Count; i++) { var group = groups[i]; var row = i / 2; var column = i % 2; var itemX = 64 + column * modelColumnWidth; var itemY = modelRowStart + row * 78; var value = group.Sum(x => x.TotalTokens); using var dot = new SolidBrush(ModelCostEstimator.ColorFor(group.Key)); e.Graphics.FillEllipse(dot, itemX, itemY + 5, 17, 17); e.Graphics.DrawString(group.Key, label, Brushes.White, itemX + 40, itemY); e.Graphics.DrawString($"{FormatTokens(value)} tokens  ·  {value * 100d / groupTotal:0.0}%", normal, muted, itemX + 40, itemY + 34); }
-        var costTop = modelRowStart + modelRows * 78 + 34; e.Graphics.DrawString("Predicted API cost", section, Brushes.White, 64, costTop); var costRows = Math.Max(1, (int)Math.Ceiling(groups.Count / 2d)); var costColumnWidth = (displayWidth - 128) / 2; decimal totalCost = 0; for (var i = 0; i < groups.Count; i++) { var group = groups[i]; var row = i / 2; var column = i % 2; var itemX = 64 + column * costColumnWidth; var itemY = costTop + 54 + row * 70; var value = ModelCostEstimator.Estimate(group); totalCost += value; using var dot = new SolidBrush(ModelCostEstimator.ColorFor(group.Key)); e.Graphics.FillEllipse(dot, itemX, itemY + 5, 17, 17); e.Graphics.DrawString(group.Key, normal, Brushes.White, itemX + 31, itemY); e.Graphics.DrawString(value == 0 ? "Rate unavailable" : $"≈ ${value:N2}", normal, muted, itemX + 31, itemY + 31); } var totalY = Math.Min(costTop + 54 + costRows * 70 + 12, displayHeight - 112); e.Graphics.DrawString("Estimated total", metric, Brushes.White, 64, totalY); var totalText = $"≈ ${totalCost:N2}"; var totalSize = e.Graphics.MeasureString(totalText, metric); e.Graphics.DrawString(totalText, metric, Brushes.White, displayWidth - totalSize.Width - 52, totalY); var navBox = new RectangleF((displayWidth - 145) / 2, displayHeight - 58, 145, 36); UiIcons.DrawSwapButton(e.Graphics, navBox, UiIcons.SwitchColor); limitsHit = navBox;
-    }
-    private static string FormatTokens(long value) => value >= 1_000_000_000 ? $"{value / 1_000_000_000d:0.#}b" : value >= 1_000_000 ? $"{value / 1_000_000d:0.#}m" : value >= 1_000 ? $"{value / 1_000d:0.#}k" : value.ToString();
-}
 internal sealed class AnalyticsForm : Form
 {
     private Action<int>? graphChanged;
-    private readonly CodexAnalyticsStore store = new(); private readonly AnalyticsDashboard dashboard = new(); private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 60_000 }; private readonly Action<int> refreshChanged; private List<CodexUsageRecord> all = []; private bool refreshing; private int graphDays = 30; private int refreshMinutes = 1;
+    private readonly CodexAnalyticsStore store = new(); private readonly AnalyticsDashboard dashboard = new(); private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 60_000 }; private readonly Action<int> refreshChanged; private List<CodexUsageRecord> all = []; private bool refreshing; private int graphDays = 30; private int refreshMinutes = 1; private float popoutScale = 1;
     public AnalyticsForm(Action showLimits, int refreshMinutes, Action<int> refreshChanged)
     {
-        this.refreshMinutes = refreshMinutes; this.refreshChanged = refreshChanged; refreshTimer.Interval = refreshMinutes * 60_000; Text = "Codex usage"; ClientSize = new Size(1210, 1597); MinimumSize = new Size(1089, 1379); StartPosition = FormStartPosition.Manual; FormBorderStyle = FormBorderStyle.None; AutoScaleMode = AutoScaleMode.None; KeyPreview = true; BackColor = Color.Black; KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) Close(); }; dashboard.Dock = DockStyle.Fill; dashboard.GraphRangeClicked += () => { graphDays = graphDays == 1 ? 7 : graphDays == 7 ? 30 : 1; Render(); }; dashboard.RefreshClicked += () => refreshChanged(refreshMinutes == 1 ? 5 : 1); dashboard.LimitsClicked += () => { Close(); showLimits(); }; Controls.Add(dashboard); refreshTimer.Tick += async (_, _) => await RefreshAsync(); Load += async (_, _) => { await RefreshAsync(); refreshTimer.Start(); }; FormClosed += (_, _) => refreshTimer.Dispose();
+        this.refreshMinutes = refreshMinutes; this.refreshChanged = refreshChanged; refreshTimer.Interval = refreshMinutes * 60_000; Text = "Codex usage"; ClientSize = new Size(600, AnalyticsDashboard.LogicalHeight); MinimumSize = Size.Empty; StartPosition = FormStartPosition.Manual; FormBorderStyle = FormBorderStyle.None; AutoScaleMode = AutoScaleMode.None; KeyPreview = true; BackColor = Color.Black; KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) Close(); }; dashboard.Dock = DockStyle.Fill; dashboard.GraphRangeClicked += () => { graphDays = graphDays == 1 ? 7 : graphDays == 7 ? 30 : 1; Render(); }; dashboard.RefreshClicked += () => refreshChanged(refreshMinutes == 1 ? 5 : 1); dashboard.LimitsClicked += () => { Close(); showLimits(); }; Controls.Add(dashboard); refreshTimer.Tick += async (_, _) => await RefreshAsync(); Load += async (_, _) => { await RefreshAsync(); refreshTimer.Start(); }; FormClosed += (_, _) => refreshTimer.Dispose();
     }
-    public void SetRefreshMinutes(int minutes) { refreshMinutes = minutes; refreshTimer.Interval = minutes * 60_000; dashboard.RefreshMinutes = minutes; dashboard.Invalidate(); }
+    public void SetRefreshMinutes(int minutes) { refreshMinutes = minutes; refreshTimer.Interval = minutes * 60_000; dashboard.RefreshMinutes = minutes; dashboard.UpdateLayout(); }
     public void SetGraphState(int days, Action<int> changed) { graphDays = days; graphChanged = changed; dashboard.GraphRangeClicked += () => graphChanged?.Invoke(graphDays); Render(); }
     public void SetGraphDays(int days) { graphDays = days; Render(); }
+    public void SetPopoutScale(int percent, Point anchor)
+    {
+        var scale = Math.Clamp(percent, 100, 200) / 100f;
+        var ratio = scale / popoutScale;
+        if (Math.Abs(ratio - 1) > 0.001f)
+        {
+            Scale(new SizeF(ratio, ratio));
+            popoutScale = scale;
+            dashboard.SetDisplayScale(scale);
+            dashboard.UpdateLayout();
+        }
+        else dashboard.SetDisplayScale(scale);
+        PlaceAboveTray(anchor);
+    }
     protected override CreateParams CreateParams { get { var parameters = base.CreateParams; parameters.ExStyle |= 0x80; return parameters; } }
     protected override void OnLoad(EventArgs e)
     {
@@ -564,10 +597,10 @@ internal sealed class AnalyticsForm : Form
         catch (Exception ex) { AppLog.Write("Analytics refresh", ex); }
         finally { refreshing = false; }
     }
-    private void ResizeForModels() { var modelCount = all.Select(x => ModelCostEstimator.DisplayModel(x.Model)).Distinct(StringComparer.OrdinalIgnoreCase).Count(); var rows = Math.Max(1, (int)Math.Ceiling(modelCount / 2d)); var desiredHeight = 1646 + (rows - 1) * 218; if (Height == desiredHeight) return; Height = desiredHeight; PlaceAboveTray(); }
+    private void ResizeForModels() { dashboard.UpdateLayout(); }
     private (DateTime Start, int Days) PeriodWindow() => (DateTime.Today.AddDays(-graphDays + 1), graphDays);
-    private void Render() { var window = PeriodWindow(); dashboard.Records = all.Where(x => x.At.ToLocalTime().Date >= window.Start && x.At.ToLocalTime().Date < window.Start.AddDays(window.Days)).ToList(); dashboard.Days = window.Days; dashboard.RefreshMinutes = refreshMinutes; dashboard.StartDate = window.Start; dashboard.Invalidate(); }
-    public void PlaceAboveTray() { var area = Screen.GetWorkingArea(Cursor.Position); Height = Math.Min(Height, Math.Max(MinimumSize.Height, area.Height - 16)); Width = Math.Min(Width, Math.Max(MinimumSize.Width, area.Width - 16)); var left = Math.Clamp(Cursor.Position.X - Width / 2, area.Left, area.Right - Width); Location = new Point(left, Math.Max(area.Top, area.Bottom - Height)); }
+    private void Render() { var window = PeriodWindow(); dashboard.Records = all.Where(x => x.At.ToLocalTime().Date >= window.Start && x.At.ToLocalTime().Date < window.Start.AddDays(window.Days)).ToList(); dashboard.Days = window.Days; dashboard.RefreshMinutes = refreshMinutes; dashboard.StartDate = window.Start; dashboard.UpdateLayout(); }
+    public void PlaceAboveTray(Point anchor) => UiIcons.PlaceAboveTray(this, anchor);
 }
 
 internal sealed class ResetData { public int ChancePercent { get; set; } public DateTimeOffset FetchedAt { get; set; } public List<ResetEvent> Events { get; set; } = []; }
@@ -593,6 +626,17 @@ internal sealed class ResetDataClient
 
 internal static class UiIcons
 {
+    public static void FitPopout(Form form, int width, int height, Point anchor)
+    {
+        form.ClientSize = new Size(width, height);
+        PlaceAboveTray(form, anchor);
+    }
+    public static void PlaceAboveTray(Form form, Point anchor)
+    {
+        var area = Screen.GetWorkingArea(anchor);
+        form.Size = new Size(Math.Min(form.Width, Math.Max(1, area.Width - 16)), Math.Min(form.Height, Math.Max(1, area.Height - 16)));
+        form.Location = new Point(Math.Clamp(anchor.X - form.Width / 2, area.Left, area.Right - form.Width), Math.Clamp(anchor.Y - form.Height - 8, area.Top, area.Bottom - form.Height));
+    }
     public static readonly Color SwitchColor = Color.FromArgb(255, 210, 70);
     public const float SwapFontSize = 10f;
     private const float SwapCanvasFontSize = 11.1111f;
@@ -603,11 +647,13 @@ internal static class UiIcons
     {
         if (form.ClientSize.Width <= 0 || form.ClientSize.Height <= 0) return;
         using var path = RoundedPath(new RectangleF(0, 0, form.ClientSize.Width, form.ClientSize.Height), 18);
+        var previous = form.Region;
         form.Region = new Region(path);
+        previous?.Dispose();
     }
     public static Button CreateSwapButton()
     {
-        var button = new Button { Text = "Swap", Size = new Size(194, 48), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(55, 46, 16), ForeColor = SwitchColor, Font = new Font("Segoe UI", SwapFontSize * 1.21f, FontStyle.Bold), UseCompatibleTextRendering = true, Cursor = Cursors.Hand };
+        var button = new Button { Text = "View limits", Size = new Size(150, 34), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(55, 46, 16), ForeColor = SwitchColor, Font = new Font("Segoe UI", 10f, FontStyle.Bold), UseCompatibleTextRendering = true, Cursor = Cursors.Hand };
         button.FlatAppearance.BorderColor = SwitchColor;
         button.FlatAppearance.BorderSize = 1;
         return button;
@@ -634,25 +680,25 @@ internal static class UiIcons
 
 internal sealed class GraphForm : Form
 {
-    private UsageSnapshot current; private List<UsageSnapshot> history; private readonly GraphCanvas canvas; private readonly Label weeklyValue; private readonly Label sessionValue; private readonly Panel weeklyBar; private readonly Panel sessionBar; private readonly Label sessionBarText; private readonly Label refreshValue; private readonly Label graphValue; private readonly Label resetChanceValue; private readonly Label lastResetValue; private readonly Action<int> refreshChanged; private readonly Action<int> durationChanged; private int selectedRefreshMinutes; private int selectedGraphDays;
+    private UsageSnapshot current; private List<UsageSnapshot> history; private readonly GraphCanvas canvas; private readonly Label weeklyValue; private readonly Label sessionValue; private readonly Panel weeklyBar; private readonly Panel sessionBar; private readonly Label sessionBarText; private readonly Label refreshValue; private readonly Label graphValue; private readonly Label resetChanceValue; private readonly Label lastResetValue; private readonly Action<int> refreshChanged; private readonly Action<int> durationChanged; private int selectedRefreshMinutes; private int selectedGraphDays; private float popoutScale = 1; private readonly Dictionary<Control, float> baseFontSizes = [];
     public GraphForm(UsageSnapshot current, List<UsageSnapshot> history, int refreshMinutes, int graphDays, Action<int> refreshChanged, Action<int> durationChanged, ResetData? resetData, Action showAnalytics)
     {
-        this.current = current; this.history = history; this.refreshChanged = refreshChanged; this.durationChanged = durationChanged; selectedRefreshMinutes = refreshMinutes; selectedGraphDays = graphDays; Text = "Codex limits"; ClientSize = new Size(1210, 1029); MinimumSize = new Size(1089, 750); StartPosition = FormStartPosition.Manual; FormBorderStyle = FormBorderStyle.None; AutoScaleMode = AutoScaleMode.None; KeyPreview = true; BackColor = Color.Black; ForeColor = Color.White; DoubleBuffered = true; KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) Close(); };
-        var header = new Panel { Dock = DockStyle.Top, Height = 440, BackColor = Color.Black };
-        header.Controls.Add(new Label { Text = "Codex limits", AutoSize = true, Location = new Point(34, 20), Font = new Font("Segoe UI", 14, FontStyle.Bold), ForeColor = Color.White });
-        resetChanceValue = new Label { AutoSize = true, Location = new Point(520, 24), Font = new Font("Segoe UI", 9, FontStyle.Bold), ForeColor = Color.FromArgb(255, 190, 70) }; header.Controls.Add(resetChanceValue);
-        lastResetValue = new Label { AutoSize = true, Location = new Point(520, 62), Font = new Font("Segoe UI", 8, FontStyle.Bold), ForeColor = Color.FromArgb(190, 190, 200) }; header.Controls.Add(lastResetValue);
-        header.Controls.Add(new Label { Text = "Weekly meter", AutoSize = true, Location = new Point(36, 100), Font = new Font("Segoe UI", 10), ForeColor = Color.LightSteelBlue });
-        weeklyValue = MetricLabel("", Color.LightSteelBlue); weeklyValue.Location = new Point(36, 150); header.Controls.Add(weeklyValue);
-        var weeklyTrack = new Panel { Location = new Point(36, 205), Size = new Size(928, 32), BackColor = Color.FromArgb(25, 55, 32) }; weeklyBar = new Panel { Location = new Point(0, 0), Height = 32, BackColor = Color.FromArgb(55, 225, 95) }; weeklyTrack.Controls.Add(weeklyBar); header.Controls.Add(weeklyTrack);
-        header.Controls.Add(new Label { Text = "5-hour meter", AutoSize = true, Location = new Point(36, 285), Font = new Font("Segoe UI", 10), ForeColor = Color.FromArgb(140, 190, 245) });
-        sessionValue = MetricLabel("", Color.FromArgb(140, 190, 245)); sessionValue.Location = new Point(36, 335); header.Controls.Add(sessionValue);
-        var sessionTrack = new Panel { Location = new Point(36, 390), Size = new Size(928, 32), BackColor = Color.FromArgb(25, 45, 70) }; sessionBar = new Panel { Location = new Point(0, 0), Height = 32, BackColor = Color.FromArgb(45, 155, 255) }; sessionTrack.Controls.Add(sessionBar); sessionBarText = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 10, FontStyle.Bold), ForeColor = Color.Black, BackColor = Color.Transparent }; sessionTrack.Controls.Add(sessionBarText); header.Controls.Add(sessionTrack);
+        this.current = current; this.history = history; this.refreshChanged = refreshChanged; this.durationChanged = durationChanged; selectedRefreshMinutes = refreshMinutes; selectedGraphDays = graphDays; Text = "Codex limits"; ClientSize = new Size(760, 740); MinimumSize = Size.Empty; StartPosition = FormStartPosition.Manual; FormBorderStyle = FormBorderStyle.None; AutoScaleMode = AutoScaleMode.None; KeyPreview = true; BackColor = Color.Black; ForeColor = Color.White; DoubleBuffered = true; KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) Close(); };
+        var header = new Panel { Width = ClientSize.Width, Dock = DockStyle.Top, Height = 350, BackColor = Color.Black };
+        header.Controls.Add(new Label { Text = "Codex limits", AutoSize = true, Location = new Point(34, 20), Font = new Font("Segoe UI", 24, FontStyle.Bold, GraphicsUnit.Pixel), ForeColor = Color.White });
+        resetChanceValue = new Label { AutoSize = true, Location = new Point(36, 62), Font = new Font("Segoe UI", 12, FontStyle.Bold, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(255, 190, 70) }; header.Controls.Add(resetChanceValue);
+        lastResetValue = new Label { AutoSize = true, Location = new Point(380, 62), Font = new Font("Segoe UI", 13, FontStyle.Regular, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(190, 190, 200) }; header.Controls.Add(lastResetValue);
+        header.Controls.Add(new Label { Text = "WEEKLY CAPACITY", Tag = "muted", AutoSize = true, Location = new Point(36, 100), Font = new Font("Segoe UI", 14, FontStyle.Regular, GraphicsUnit.Pixel), ForeColor = Color.LightSteelBlue });
+        weeklyValue = MetricLabel("", Color.LightSteelBlue); weeklyValue.Location = new Point(36, 135); header.Controls.Add(weeklyValue);
+        var weeklyTrack = new Panel { Location = new Point(36, 177), Size = new Size(688, 16), BackColor = Color.FromArgb(25, 55, 32) }; weeklyTrack.Tag = "track"; weeklyTrack.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top; weeklyBar = new Panel { Tag = "weekly", Location = new Point(0, 0), Height = 16, BackColor = Color.FromArgb(55, 225, 95) }; weeklyTrack.Controls.Add(weeklyBar); header.Controls.Add(weeklyTrack);
+        header.Controls.Add(new Label { Text = "5-HOUR CAPACITY", Tag = "muted", AutoSize = true, Location = new Point(36, 229), Font = new Font("Segoe UI", 14, FontStyle.Regular, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(140, 190, 245) });
+        sessionValue = MetricLabel("", Color.FromArgb(140, 190, 245)); sessionValue.Location = new Point(36, 265); header.Controls.Add(sessionValue);
+        var sessionTrack = new Panel { Location = new Point(36, 307), Size = new Size(688, 16), BackColor = Color.FromArgb(25, 45, 70) }; sessionTrack.Tag = "track"; sessionTrack.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top; sessionBar = new Panel { Tag = "session", Location = new Point(0, 0), Height = 16, BackColor = Color.FromArgb(45, 155, 255) }; sessionTrack.Controls.Add(sessionBar); sessionBarText = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 13, FontStyle.Bold, GraphicsUnit.Pixel), ForeColor = Color.Black, BackColor = Color.Transparent };  header.Controls.Add(sessionTrack);
         canvas = new GraphCanvas(); canvas.Dock = DockStyle.Fill; canvas.Current = current; canvas.History = history;
         var footer = new Panel { Dock = DockStyle.Bottom, Height = 112, BackColor = Color.Black };
-        refreshValue = new Label { AutoSize = true, Location = new Point(36, 14), Font = new Font("Segoe UI", 8, FontStyle.Bold), ForeColor = Color.FromArgb(45, 155, 255) }; footer.Controls.Add(refreshValue);
-        graphValue = new Label { AutoSize = true, Location = new Point(440, 14), Font = new Font("Segoe UI", 8, FontStyle.Bold), ForeColor = Color.FromArgb(45, 155, 255) }; footer.Controls.Add(graphValue);
-        var analyticsValue = new Button { Text = "Swap", Size = new Size(144, 34), Location = new Point((footer.Width - 144) / 2, 70), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(55, 46, 16), ForeColor = UiIcons.SwitchColor, Font = new Font("Segoe UI", UiIcons.SwapFontSize, FontStyle.Bold), UseCompatibleTextRendering = true, Cursor = Cursors.Hand }; analyticsValue.FlatAppearance.BorderColor = UiIcons.SwitchColor; analyticsValue.FlatAppearance.BorderSize = 1; footer.Resize += (_, _) => analyticsValue.Left = (footer.Width - analyticsValue.Width) / 2; analyticsValue.Click += (_, _) => { Close(); showAnalytics(); }; new ToolTip().SetToolTip(analyticsValue, "Switch to usage analytics"); footer.Controls.Add(analyticsValue); analyticsValue.BringToFront();
+        refreshValue = new Label { AutoSize = true, Location = new Point(36, 14), Font = new Font("Segoe UI", 13, FontStyle.Regular, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(45, 155, 255) }; footer.Controls.Add(refreshValue);
+        graphValue = new Label { AutoSize = true, Location = new Point(440, 14), Font = new Font("Segoe UI", 13, FontStyle.Regular, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(45, 155, 255) }; footer.Controls.Add(graphValue);
+        var analyticsValue = new Button { Text = "Swap", Size = new Size(144, 34), Location = new Point((footer.Width - 144) / 2, 70), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(55, 46, 16), ForeColor = UiIcons.SwitchColor, Font = new Font("Segoe UI", 14, FontStyle.Bold, GraphicsUnit.Pixel), UseCompatibleTextRendering = true, Cursor = Cursors.Hand }; analyticsValue.FlatAppearance.BorderColor = UiIcons.SwitchColor; analyticsValue.FlatAppearance.BorderSize = 1; footer.Resize += (_, _) => analyticsValue.Left = (footer.Width - analyticsValue.Width) / 2; analyticsValue.Click += (_, _) => { Close(); showAnalytics(); }; new ToolTip().SetToolTip(analyticsValue, "Switch between limits and usage"); footer.Controls.Add(analyticsValue); analyticsValue.BringToFront();
         refreshValue.Cursor = Cursors.Hand; graphValue.Cursor = Cursors.Hand;
         refreshValue.Click += (_, _) => refreshChanged(selectedRefreshMinutes == 1 ? 5 : 1);
         graphValue.Click += (_, _) => durationChanged(selectedGraphDays == 1 ? 7 : selectedGraphDays == 7 ? 30 : 1);
@@ -660,8 +706,34 @@ internal sealed class GraphForm : Form
         UpdateData(current, history);
         SetOptions(refreshMinutes, graphDays);
         SetResetData(resetData);
+        Resize += (_, _) => UpdateData(this.current, this.history);
+        CaptureFontSizes(this);
     }
     public void SetOptions(int minutes, int days) { selectedRefreshMinutes = minutes; selectedGraphDays = days; refreshValue.Text = $"Refresh: {minutes} min"; graphValue.Text = $"Graph: {days} day{(days == 1 ? "" : "s")}"; canvas.RangeDays = days; canvas.Invalidate(); }
+    public void SetPopoutScale(int percent, Point anchor)
+    {
+        var scale = Math.Clamp(percent, 100, 200) / 100f;
+        var ratio = scale / popoutScale;
+        if (Math.Abs(ratio - 1) > 0.001f)
+        {
+            Scale(new SizeF(ratio, ratio));
+            popoutScale = scale;
+            canvas.LayoutScale = scale;
+        }
+        foreach (var pair in baseFontSizes)
+        {
+            pair.Key.Font = new Font(pair.Key.Font.FontFamily, pair.Value * scale, pair.Key.Font.Style, GraphicsUnit.Pixel);
+        }
+        PlaceAboveTray(anchor);
+    }
+    private void CaptureFontSizes(Control parent)
+    {
+        foreach (Control child in parent.Controls)
+        {
+            baseFontSizes[child] = child.Font.Size;
+            CaptureFontSizes(child);
+        }
+    }
     protected override CreateParams CreateParams { get { var parameters = base.CreateParams; parameters.ExStyle |= 0x80; return parameters; } }
     protected override void OnLoad(EventArgs e)
     {
@@ -676,22 +748,10 @@ internal sealed class GraphForm : Form
         ShowInTaskbar = false;
         base.SetVisibleCore(value);
     }
-    protected override void OnShown(EventArgs e)
-    {
-        base.OnShown(e);
-        var footer = Controls.OfType<Panel>().FirstOrDefault(panel => panel.Dock == DockStyle.Bottom);
-        var swap = footer?.Controls.OfType<Button>().FirstOrDefault(button => button.Text == "Swap");
-        if (footer != null && swap != null)
-        {
-            footer.Height = 194;
-            swap.Size = new Size(194, 48);
-            swap.Location = new Point((footer.ClientSize.Width - swap.Width) / 2, 117);
-        }
-    }
     public void SetResetData(ResetData? data) { resetChanceValue.Text = data == null ? "Reset chance: unavailable" : $"Next reset chance: {data.ChancePercent}% (48h)"; var latest = data?.Events.OrderByDescending(x => x.AnnouncedAt).FirstOrDefault(); lastResetValue.Text = latest == null ? "Last reset: unavailable" : $"Days since last reset: {Math.Max(0, (DateTimeOffset.UtcNow - latest.AnnouncedAt).TotalDays):0.0}"; canvas.ResetEvents = data?.Events ?? []; canvas.Invalidate(); }
     private Label MetricLabel(string name, Color color)
     {
-        return new Label { Text = $"{(name == "Weekly" ? current.WeeklyRemaining : current.SessionRemaining):0}% remaining", AutoSize = true, Font = new Font("Segoe UI", 8, FontStyle.Bold), ForeColor = color };
+        return new Label { Text = $"{(name == "Weekly" ? current.WeeklyRemaining : current.SessionRemaining):0}% remaining", AutoSize = true, Font = new Font("Segoe UI", 17, FontStyle.Bold, GraphicsUnit.Pixel), ForeColor = color };
     }
     public void UpdateData(UsageSnapshot value, List<UsageSnapshot> points)
     {
@@ -699,8 +759,8 @@ internal sealed class GraphForm : Form
         var weeklyText = $"{value.WeeklyRemaining:0}% remaining ({WeeklyResetText(value.WeeklyResetAt)})";
         var sessionText = $"{value.SessionRemaining:0}% remaining ({SessionResetText(value.SessionResetAt)})";
         weeklyValue.Text = weeklyText; sessionValue.Text = sessionText;
-        weeklyBar.Width = Math.Max(4, (int)((Width - 72) * value.WeeklyRemaining / 100));
-        sessionBar.Width = Math.Max(4, (int)((Width - 72) * value.SessionRemaining / 100)); sessionBarText.Text = "";
+        weeklyBar.Width = (int)(weeklyBar.Parent!.ClientSize.Width * Math.Clamp(value.WeeklyRemaining, 0, 100) / 100);
+        sessionBar.Width = (int)(sessionBar.Parent!.ClientSize.Width * Math.Clamp(value.SessionRemaining, 0, 100) / 100); sessionBarText.Text = "";
     }
     private static string WeeklyResetText(DateTimeOffset? resetAt)
     {
@@ -716,18 +776,16 @@ internal sealed class GraphForm : Form
         if (remaining <= TimeSpan.Zero) return "resetting now";
         return $"resets in {Math.Max(0, (int)remaining.TotalHours)} hrs {remaining.Minutes} mins";
     }
-    public void PlaceAboveTray()
+    public void PlaceAboveTray(Point anchor)
     {
-        var area = Screen.GetWorkingArea(Cursor.Position);
-        Height = Math.Min(Height, Math.Max(MinimumSize.Height, area.Height - 16));
-        Width = Math.Min(Width, Math.Max(MinimumSize.Width, area.Width - 16));
-        var left = Math.Clamp(Cursor.Position.X - Width / 2, area.Left, area.Right - Width);
-        Location = new Point(left, Math.Max(area.Top, area.Bottom - Height));
+        UiIcons.PlaceAboveTray(this, anchor);
     }
+
 }
 
 internal sealed class GraphCanvas : Panel
 {
+    public float LayoutScale { get; set; } = 1;
     public UsageSnapshot? Current { get; set; } public List<UsageSnapshot> History { get; set; } = []; public int RangeDays { get; set; } = 7; public List<ResetEvent> ResetEvents { get; set; } = [];
     private int hoverX = -1;
     private double? hoverValue;
@@ -735,30 +793,31 @@ internal sealed class GraphCanvas : Panel
     public GraphCanvas() { BackColor = Color.FromArgb(24, 25, 29); DoubleBuffered = true; Padding = new Padding(24); MouseMove += UpdateHover; MouseLeave += (_, _) => { hoverX = -1; hoverValue = null; hoverTime = null; Invalidate(); }; }
     private void UpdateHover(object? sender, MouseEventArgs e)
     {
-        var plot = new Rectangle(120, 100, Math.Max(100, Width - 180), Math.Max(100, Height - 170));
-        if (e.X < plot.Left || e.X > plot.Right || e.Y < plot.Top || e.Y > plot.Bottom) { hoverX = -1; hoverValue = null; hoverTime = null; Invalidate(); return; }
+        var plot = new Rectangle(120, 100, Math.Max(100, (int)(Width / LayoutScale) - 180), Math.Max(100, (int)(Height / LayoutScale) - 170));
+        var mouseX = e.X / LayoutScale; var mouseY = e.Y / LayoutScale;
+        if (mouseX < plot.Left || mouseX > plot.Right || mouseY < plot.Top || mouseY > plot.Bottom) { hoverX = -1; hoverValue = null; hoverTime = null; Invalidate(); return; }
         var points = VisiblePoints();
         if (points.Count == 0) return;
-        var rangeStart = DateTimeOffset.UtcNow.AddDays(-RangeDays); var point = points.OrderBy(x => Math.Abs((plot.Left + (x.At - rangeStart).TotalDays / RangeDays * plot.Width) - e.X)).First();
+        var rangeStart = DateTimeOffset.UtcNow.AddDays(-RangeDays); var point = points.OrderBy(x => Math.Abs((plot.Left + (x.At - rangeStart).TotalDays / RangeDays * plot.Width) - mouseX)).First();
         hoverX = (int)Math.Clamp(plot.Left + (point.At - rangeStart).TotalDays / RangeDays * plot.Width, plot.Left, plot.Right); hoverValue = point.WeeklyRemaining; hoverTime = point.At; Invalidate();
     }
     protected override void OnPaint(PaintEventArgs e)
     {
-        e.Graphics.Clear(BackColor); var plot = new Rectangle(120, 100, Math.Max(100, Width - 180), Math.Max(100, Height - 170)); using var grid = new Pen(Color.FromArgb(38, 43, 48)); using var text = new SolidBrush(ThemeManager.Current.Muted); using var font = new Font("Segoe UI", 7);
+        e.Graphics.Clear(BackColor); e.Graphics.ScaleTransform(LayoutScale, LayoutScale); var plot = new Rectangle(120, 100, Math.Max(100, (int)(Width / LayoutScale) - 180), Math.Max(100, (int)(Height / LayoutScale) - 170)); using var grid = new Pen(Color.FromArgb(55, ThemeManager.Current.Muted)); using var text = new SolidBrush(ThemeManager.Current.Muted); using var font = new Font("Segoe UI", 12, FontStyle.Regular, GraphicsUnit.Pixel);
         for (int i = 0; i <= 4; i++) { var y = plot.Top + i * plot.Height / 4; e.Graphics.DrawLine(grid, plot.Left, y, plot.Right, y); e.Graphics.DrawString($"{100 - i * 25}%", font, text, 18, y - 8); }
-        using var heading = new Font("Segoe UI", 10, FontStyle.Bold); e.Graphics.DrawString("Remaining usage", heading, Brushes.White, 34, 20); if (RangeDays == 1) { for (var i = 0; i <= 4; i++) { var x = plot.Left + i * plot.Width / 4f; e.Graphics.DrawLine(grid, x, plot.Top, x, plot.Bottom); var label = DateTimeOffset.UtcNow.AddHours(-24 + i * 6).ToLocalTime().ToString("HH:mm"); var labelSize = e.Graphics.MeasureString(label, font); e.Graphics.DrawString(label, font, text, x - labelSize.Width / 2, plot.Bottom + 12); } } else { e.Graphics.DrawString($"{RangeDays} day{(RangeDays == 1 ? "" : "s")} ago", font, text, plot.Left, plot.Bottom + 12); e.Graphics.DrawString("Today", font, text, plot.Right - 55, plot.Bottom + 12); }
+        using var heading = new Font("Segoe UI", 14, FontStyle.Bold, GraphicsUnit.Pixel); e.Graphics.DrawString("Remaining usage", heading, Brushes.White, 34, 20); if (RangeDays == 1) { for (var i = 0; i <= 4; i++) { var x = plot.Left + i * plot.Width / 4f; e.Graphics.DrawLine(grid, x, plot.Top, x, plot.Bottom); var label = DateTimeOffset.UtcNow.AddHours(-24 + i * 6).ToLocalTime().ToString("HH:mm"); var labelSize = e.Graphics.MeasureString(label, font); e.Graphics.DrawString(label, font, text, x - labelSize.Width / 2, plot.Bottom + 12); } } else { e.Graphics.DrawString($"{RangeDays} day{(RangeDays == 1 ? "" : "s")} ago", font, text, plot.Left, plot.Bottom + 12); e.Graphics.DrawString("Today", font, text, plot.Right - 55, plot.Bottom + 12); }
         var rangeStart = DateTimeOffset.UtcNow.AddDays(-RangeDays);
         foreach (var reset in ResetEvents.Where(x => x.AnnouncedAt >= rangeStart && x.AnnouncedAt <= DateTimeOffset.UtcNow)) { var x = plot.Left + (float)((reset.AnnouncedAt - rangeStart).TotalDays / RangeDays) * plot.Width; using var resetPen = new Pen(reset.ResetType.Equals("banked", StringComparison.OrdinalIgnoreCase) ? Color.SaddleBrown : Color.DeepSkyBlue, 2); e.Graphics.DrawLine(resetPen, x, plot.Top, x, plot.Bottom); }
         var points = VisiblePoints();
-        if (points.Count < 2) { using var empty = new SolidBrush(Color.FromArgb(150, 154, 165)); var msg = "Weekly history is collecting — check back after a few refreshes."; var size = e.Graphics.MeasureString(msg, font); e.Graphics.DrawString(msg, font, empty, plot.Left + (plot.Width - size.Width) / 2, plot.Top + plot.Height / 2 - 10); return; }
+        if (points.Count < 2) { using var empty = new SolidBrush(ThemeManager.Current.Muted); var msg = "Weekly history is collecting — check back after a few refreshes."; var size = e.Graphics.MeasureString(msg, font); e.Graphics.DrawString(msg, font, empty, plot.Left + (plot.Width - size.Width) / 2, plot.Top + plot.Height / 2 - 10); return; }
         var usageRangeStart = DateTimeOffset.UtcNow.AddDays(-RangeDays);
         PointF p(int i, double val) => new(plot.Left + (float)Math.Clamp((points[i].At - usageRangeStart).TotalDays / RangeDays, 0, 1) * plot.Width, plot.Top + (float)(100 - Math.Clamp(val, 0, 100)) * plot.Height / 100);
-        using var line = new Pen(Color.MediumSeaGreen, 3); using var dot = new SolidBrush(Color.MediumSeaGreen); for (int i = 1; i < points.Count; i++) e.Graphics.DrawLine(line, p(i - 1, points[i - 1].WeeklyRemaining), p(i, points[i].WeeklyRemaining)); foreach (var point in points) { var q = p(points.IndexOf(point), point.WeeklyRemaining); e.Graphics.FillEllipse(dot, q.X - 4, q.Y - 4, 8, 8); }
+        using var line = new Pen(ThemeManager.Current.Good, 3); using var dot = new SolidBrush(ThemeManager.Current.Good); for (int i = 1; i < points.Count; i++) e.Graphics.DrawLine(line, p(i - 1, points[i - 1].WeeklyRemaining), p(i, points[i].WeeklyRemaining)); foreach (var point in points) { var q = p(points.IndexOf(point), point.WeeklyRemaining); e.Graphics.FillEllipse(dot, q.X - 4, q.Y - 4, 8, 8); }
         if (hoverX >= plot.Left && hoverX <= plot.Right && hoverValue.HasValue && hoverTime.HasValue)
         {
             var hoverRangeStart = DateTimeOffset.UtcNow.AddDays(-RangeDays); var dotPoint = new PointF(plot.Left + (float)Math.Clamp((hoverTime.Value - hoverRangeStart).TotalDays / RangeDays, 0, 1) * plot.Width, plot.Top + (float)(100 - Math.Clamp(hoverValue.Value, 0, 100)) * plot.Height / 100);
-            using var dotOutline = new SolidBrush(Color.FromArgb(220, 255, 255, 255)); using var dotBrush = new SolidBrush(Color.FromArgb(55, 225, 95)); e.Graphics.FillEllipse(dotOutline, dotPoint.X - 7, dotPoint.Y - 7, 14, 14); e.Graphics.FillEllipse(dotBrush, dotPoint.X - 5, dotPoint.Y - 5, 10, 10);
-            using var hoverFont = new Font("Segoe UI", 8, FontStyle.Bold); var label = $"{hoverValue.Value:0.0}%  •  {hoverTime.Value.ToLocalTime():HH:mm}"; var size = e.Graphics.MeasureString(label, hoverFont); var badge = new RectangleF(plot.Right - size.Width - 18, 16, size.Width + 14, size.Height + 8); using var badgeBackground = new SolidBrush(Color.FromArgb(35, 45, 39)); using var badgeBorder = new Pen(Color.FromArgb(55, 225, 95), 1); e.Graphics.FillRectangle(badgeBackground, badge); e.Graphics.DrawRectangle(badgeBorder, badge.X, badge.Y, badge.Width, badge.Height); using var labelBrush = new SolidBrush(Color.FromArgb(55, 225, 95)); e.Graphics.DrawString(label, hoverFont, labelBrush, badge.X + 7, badge.Y + 4);
+            using var dotOutline = new SolidBrush(Color.FromArgb(220, 255, 255, 255)); using var dotBrush = new SolidBrush(ThemeManager.Current.Good); e.Graphics.FillEllipse(dotOutline, dotPoint.X - 7, dotPoint.Y - 7, 14, 14); e.Graphics.FillEllipse(dotBrush, dotPoint.X - 5, dotPoint.Y - 5, 10, 10);
+            using var hoverFont = new Font("Segoe UI", 13, FontStyle.Regular, GraphicsUnit.Pixel); var label = $"{hoverValue.Value:0.0}%  •  {hoverTime.Value.ToLocalTime():HH:mm}"; var size = e.Graphics.MeasureString(label, hoverFont); var badge = new RectangleF(plot.Right - size.Width - 18, 16, size.Width + 14, size.Height + 8); using var badgeBackground = new SolidBrush(ThemeManager.Current.Panel); using var badgeBorder = new Pen(ThemeManager.Current.Good, 1); e.Graphics.FillRectangle(badgeBackground, badge); e.Graphics.DrawRectangle(badgeBorder, badge.X, badge.Y, badge.Width, badge.Height); using var labelBrush = new SolidBrush(ThemeManager.Current.Good); e.Graphics.DrawString(label, hoverFont, labelBrush, badge.X + 7, badge.Y + 4);
         }
     }
     private List<UsageSnapshot> VisiblePoints() { var rangeStart = DateTimeOffset.UtcNow.AddDays(-RangeDays); var points = History.Where(x => x.At >= rangeStart).OrderBy(x => x.At).ToList(); if (Current != null && (points.Count == 0 || points[^1].At != Current.At)) points.Add(Current); if (points.Count == 0) return points; var interval = RangeDays == 1 ? TimeSpan.FromHours(1) : RangeDays == 7 ? TimeSpan.FromHours(6) : TimeSpan.FromDays(1); var count = (int)Math.Ceiling(TimeSpan.FromDays(RangeDays).TotalHours / interval.TotalHours); var sampled = new List<UsageSnapshot>(); for (var i = 0; i <= count; i++) { var slot = rangeStart + TimeSpan.FromTicks(interval.Ticks * i); var sample = points.LastOrDefault(x => x.At <= slot) ?? points.FirstOrDefault(x => x.At <= slot + interval); if (sample != null) sampled.Add(sample with { At = slot }); } return sampled; }
@@ -773,3 +832,4 @@ internal static class GraphicsExtensions
     private static GraphicsPath RoundedPath(float x, float y, float w, float h, float radius)
     { var p = new GraphicsPath(); p.AddArc(x, y, radius * 2, radius * 2, 180, 90); p.AddArc(x + w - radius * 2, y, radius * 2, radius * 2, 270, 90); p.AddArc(x + w - radius * 2, y + h - radius * 2, radius * 2, radius * 2, 0, 90); p.AddArc(x, y + h - radius * 2, radius * 2, radius * 2, 90, 90); p.CloseFigure(); return p; }
 }
+

@@ -1,153 +1,134 @@
 # Codex Usage Tray
 
-> A quiet Windows companion for seeing Codex limits, usage, model activity, and estimated API cost at a glance.
+**Your Codex capacity and activity, one click away.**
 
-[![Latest release](https://img.shields.io/github/v/release/colemanuk82/CodexUsageTray?label=latest%20release)](https://github.com/colemanuk82/CodexUsageTray/releases/latest)
-[![License](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+A Windows tray companion for usage limits, reset timing, and local session analytics.
 
-Codex Usage Tray lives in the Windows status area and keeps the useful numbers close without opening a browser or adding another taskbar window. Click the status icon for live limit meters, or switch to the usage view for local history, model breakdowns, and cost estimates.
+[![Latest release](https://img.shields.io/github/v/release/colemanuk82/CodexUsageTray?label=Download)](https://github.com/colemanuk82/CodexUsageTray/releases/latest)
+[![Windows](https://img.shields.io/badge/Windows-10%2B-0078D4)](#requirements)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## See it in action
+[Download](https://github.com/colemanuk82/CodexUsageTray/releases/latest) · [Getting started](#getting-started) · [Themes](#themes) · [Build from source](#build-from-source)
 
-<p align="center">
-  <img src="docs/limits-popout.png" alt="Codex limits popout" width="320">&nbsp;
-  <img src="docs/usage-popout.png" alt="Codex usage popout" width="320">
-</p>
+## At a glance
 
-<p align="center"><em>Codex limits and Codex usage — compact, themeable popouts anchored to the status icon.</em></p>
+| Limits | Usage |
+| :---: | :---: |
+| ![Limits with remaining capacity and history](docs/limits-popout.png) | ![Usage summary and model breakdown](docs/usage-popout.png) |
 
-## Why use it?
+*Interface previews use illustrative sample data.*
 
-- Know how much five-hour and weekly capacity remains before starting a large task.
-- See whether a reset may be approaching, with historical reset markers and countdowns.
-- Understand which models are consuming tokens and what the activity may cost.
-- Keep everything local: the app reads local Codex data and caches only the information needed for the display.
+Keep live capacity close without another taskbar window. The limits view shows what remains; the usage view explains your local activity over time.
 
-## Features
+- **Capacity at a glance.** Five-hour and weekly meters, reset countdowns, and a two-bar tray icon.
+- **Readable summaries.** Total tokens, calls, sessions, cached input, and average daily usage.
+- **Useful history.** Switch between 1-day, 7-day, and 30-day views, with reset markers on the limits chart.
+- **Model detail.** Compare token share and estimated API cost, with page controls for additional models.
+- **Personal appearance.** Seven themes with coordinated surfaces, text, controls, and chart accents.
+- **Everyday convenience.** Refresh every minute or every five minutes, and optionally start with Windows.
 
-- Five-hour and weekly remaining-usage meters.
-- Tray icon with separate five-hour and weekly usage bars.
-- Live reset countdowns for both limit windows.
-- Weekly usage history graph with 1-day, 7-day, and 30-day ranges.
-- Hourly points and time markers in the 1-day graph.
-- Historical reset markers and reset-probability information.
-- Codex usage panel with total tokens, calls, sessions, cached input tokens, and average daily usage.
-- Model usage breakdown with proportional usage bar, token totals, and percentages.
-- Predicted API cost by model and estimated total cost.
-- Automatic refresh at a selectable 1-minute or 5-minute interval.
-- Popout switcher between Codex limits and Codex usage.
-- Theme presets: Default, AMOLED, Dracula, Nord, Solarized Dark, Light, and translucent Glass.
-- Start with Windows option.
-- Local history and rate caching.
-- No account credentials or usage history are uploaded by this application.
+## Getting started
 
-### Tray icon
+1. Download the setup executable from the [latest release](https://github.com/colemanuk82/CodexUsageTray/releases/latest).
+2. Run the installer. It installs for the current user, creates a Start Menu shortcut, and launches the app.
+3. Click the tray icon to open your limits. Choose **View usage** for session analytics.
+4. Right-click the tray icon to choose a theme, adjust settings, or exit.
 
-The tray icon shows the weekly bar above the five-hour bar:
+The installer uses `%LOCALAPPDATA%\CodexUsageTray` and replaces an older running copy. If Windows hides the icon, open the tray overflow to find it.
 
-![Codex Usage Tray icon showing weekly and five-hour bars](docs/tray-icon.png)
+### Requirements
 
-Both bars turn red when the reset monitor reports a high possibility of a reset (above 70%).
+- Windows 10 or later.
+- An authenticated Codex CLI session with local authentication data.
+- .NET 8 Desktop Runtime for framework-dependent builds. Self-contained builds include the runtime.
 
-## Interface
+### Reading the interface
 
-The screenshots above show the tray-only Release interface; the popouts do not add separate taskbar entries. The limits view focuses on live capacity and reset timing, while the usage view turns local session history into readable trends, model totals, and cost estimates.
+| Element | Meaning |
+| --- | --- |
+| Top tray bar | Weekly capacity remaining |
+| Bottom tray bar | Five-hour capacity remaining |
+| Red tray bars | The reset monitor reports a reset probability above 70% |
+| Limits history | Remaining weekly capacity over the selected period |
+| Cumulative token chart | Running token total across the selected calendar period |
+| Estimated API cost | Approximate model usage cost, not a subscription charge or invoice |
 
-### Theme gallery
-
-The same popouts can be restyled from the tray menu. These current captures show AMOLED, Dracula, and Light:
-
-| Theme | Limits | Usage |
-| --- | --- | --- |
-| AMOLED | ![AMOLED limits](docs/theme-amoled-limits.png) | ![AMOLED usage](docs/theme-amoled-usage.png) |
-| Dracula | ![Dracula limits](docs/theme-dracula-limits.png) | ![Dracula usage](docs/theme-dracula-usage.png) |
-| Light | ![Light limits](docs/theme-light-limits.png) | ![Light usage](docs/theme-light-usage.png) |
+Click the range and refresh controls to cycle their values. Press **Esc** to close either popout. Both windows scale to your display without scrollbars; use **Previous** and **Next** to browse model details.
 
 ## Themes
 
-Themes are selected from the tray icon’s right-click menu and apply to both popouts:
+Select a theme from the tray icon’s right-click menu. Your choice is saved and applied to both windows.
 
-- Default — the original black interface.
-- AMOLED — pure-black surfaces with bright OLED-friendly accents.
-- Dracula — purple-led accents with pink and green highlights.
-- Nord — cool blue-gray surfaces and soft Nordic accents.
-- Solarized Dark — the classic teal, blue, and gold palette.
-- Light — bright surfaces with high-contrast dark text.
-- Glass — translucent dark-blue popouts with soft blue borders.
+| Theme | Appearance |
+| --- | --- |
+| Default | Slate surfaces, soft text, and blue accents |
+| AMOLED | Pure-black background with vivid accents |
+| Dracula | Purple-gray surfaces with lavender highlights |
+| Nord | Cool blue-gray surfaces and muted Nordic colours |
+| Solarized Dark | Deep teal surfaces with blue and gold accents |
+| Light | Bright surfaces with dark text |
+| Glass | Subtly translucent dark-blue surfaces |
 
-## Project
+<details>
+<summary>View theme previews</summary>
 
-[View the public GitHub repository](https://github.com/colemanuk82/CodexUsageTray)
+| AMOLED | Dracula | Light |
+| :---: | :---: | :---: |
+| ![AMOLED usage](docs/theme-amoled-usage.png) | ![Dracula usage](docs/theme-dracula-usage.png) | ![Light usage](docs/theme-light-usage.png) |
 
-## Integrations
+</details>
 
-### Codex usage service
+## Data and privacy
 
-The app reads the live Codex usage response from the ChatGPT backend endpoint:
+Session analytics are calculated locally. The app does not upload local session history or collect telemetry. It uses the existing Codex authentication token to request account usage; no separate sign-in form is required.
 
-- `https://chatgpt.com/backend-api/wham/usage`
+| Source | Purpose |
+| --- | --- |
+| `%USERPROFILE%\.codex\auth.json` | Existing authentication for the account usage request |
+| `%USERPROFILE%\.codex\sessions` | Local token counts, model activity, calls, and sessions |
+| `%LOCALAPPDATA%\CodexUsageTray` | Local history, settings, caches, and diagnostic logs |
+| ChatGPT usage service | Live account limits via `/backend-api/wham/usage` |
+| Codex Reset Today API | Public reset announcements and probability estimates |
+| Public model-pricing pages | Periodic pricing updates for cost estimates |
+| GitHub | Release checks and update links |
 
-It uses the existing Codex authentication token from the local file below and does not ask the user to enter credentials:
+Reset information comes from the public [Codex Reset Today API](https://codex-reset.today/developers) and is cached locally. Model pricing uses built-in fallback rates and a periodically refreshed local cache. Unavailable model rates are labelled in the interface.
 
-- `%USERPROFILE%\\.codex\\auth.json`
+## Build from source
 
-### Codex CLI session history
+Install the .NET 8 SDK or a compatible newer SDK on Windows, then run from the repository directory:
 
-Model usage, token totals, calls, sessions, and cost estimates are calculated from local Codex CLI session records:
+```powershell
+dotnet build -c Release
+```
 
-- `%USERPROFILE%\\.codex\\sessions`
-
-The app reads `token_count` records and keeps its local snapshot history under:
-
-- `%LOCALAPPDATA%\\CodexUsageTray\\state.json`
-
-### Codex Reset Today API
-
-Historical reset data and reset estimates come from the public, read-only Codex Reset Today REST API. No API key is required.
-
-- [API and MCP documentation](https://codex-reset.today/developers)
-- [Current reset status API](https://codex-reset.today/api/v1/status)
-- [Historical reset announcements API](https://codex-reset.today/api/v1/resets?limit=100&order=desc)
-- [Codex Reset Today](https://codex-reset.today/)
-
-The app uses the status endpoint for the next-reset probability and the resets endpoint for timestamped regular and banked reset history. API results are cached locally for use between refreshes.
-
-### Model pricing
-
-The estimated-cost view uses built-in fallback rates and periodically checks public model pricing pages when a matching model is available. Rates are cached locally for 24 hours. Estimates are informational only and are not billing data.
-
-## Privacy
-
-All usage processing and history storage are local to the Windows machine. The app contacts only the Codex usage endpoint, the Codex Reset Today API, and public model-pricing pages used for cost estimates. It does not collect telemetry or transmit local session history.
-
-## Requirements
-
-- Windows 10 or later.
-- .NET 8 desktop runtime when using the framework-dependent build.
-- An existing Codex CLI installation and authenticated Codex session.
-
-## Installation
-
-Download `CodexUsageTray-v2.0.8-Setup.exe` from the [latest GitHub release](https://github.com/colemanuk82/CodexUsageTray/releases/latest) and run it. The installer installs the current Release build for the signed-in Windows user under `%LOCALAPPDATA%\\CodexUsageTray`, creates a Start Menu shortcut with the matching two-bar tray icon, replaces an older running copy, and launches the tray icon.
-
-## Build
+Publish a framework-dependent Windows x64 build:
 
 ```powershell
 dotnet publish -c Release -r win-x64 --self-contained false
 ```
 
-For a self-contained single-file executable:
+Or publish a self-contained single-file executable:
 
 ```powershell
 dotnet publish -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true
 ```
 
-The published executable is located at:
+The published executable is written to:
 
 ```text
-bin\\Release\\net8.0-windows\\win-x64\\publish\\CodexUsageTray.exe
+bin\Release\net8.0-windows\win-x64\publish\CodexUsageTray.exe
 ```
 
-## Disclaimer
+## Troubleshooting
 
-This is an independent utility and is not affiliated with or endorsed by OpenAI. The usage meter shown by the Codex account remains authoritative. Reset forecasts and API cost figures are estimates and should not be treated as official billing or quota information.
+- **No account limits:** confirm that Codex is signed in and the local authentication file exists.
+- **No usage history:** analytics appear after Codex writes session activity. The limits chart needs a few refreshes to accumulate history.
+- **Unavailable cost:** a matching model rate may not be available. Estimates can differ from actual billing.
+- **Startup or refresh problems:** inspect `%LOCALAPPDATA%\CodexUsageTray\crash.log` if present. Remove sensitive information before sharing logs in an issue.
+
+## License and acknowledgements
+
+Released under the [MIT License](LICENSE). Reset data is provided by [Codex Reset Today](https://codex-reset.today/).
+
+This independent project is not affiliated with or endorsed by OpenAI. Official account usage remains authoritative; reset probabilities and API cost estimates are not guarantees or billing data.
