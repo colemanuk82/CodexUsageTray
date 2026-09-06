@@ -676,7 +676,8 @@ internal sealed class ResetDataClient
         {
             var data = JsonSerializer.Deserialize<ResetData>(File.ReadAllText(CachePath), json);
             if (data == null) return null;
-            if (data.Chance24HourPercent < 0) data.Chance24HourPercent = data.ChancePercent;
+            var needsForecastRefresh = data.Chance24HourPercent < 0;
+            if (needsForecastRefresh) { data.Chance24HourPercent = data.ChancePercent; data.FetchedAt = DateTimeOffset.MinValue; }
             var forecastStillValid = data.ApiChancePercent >= 0 && data.ForecastValidUntil > DateTimeOffset.UtcNow;
             data.ChancePercent = forecastStillValid ? data.ApiChancePercent : EstimateHistoricalChance(data.Events);
             if (!forecastStillValid) data.Chance24HourPercent = EstimateHistoricalChance(data.Events);
