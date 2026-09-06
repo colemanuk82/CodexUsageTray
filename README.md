@@ -128,7 +128,7 @@ All usage processing and history storage are local to the Windows machine. The a
 
 ## Installation
 
-Download `CodexUsageTray-v2.0.7-Setup.exe` from the [latest GitHub release](https://github.com/colemanuk82/CodexUsageTray/releases/latest) and run it. The installer installs the current Release build for the signed-in Windows user under `%LOCALAPPDATA%\\CodexUsageTray`, replaces an older running copy, and launches the tray icon.
+Download `CodexUsageTray-v2.0.8-Setup.exe` from the [latest GitHub release](https://github.com/colemanuk82/CodexUsageTray/releases/latest) and run it. The installer installs the current Release build for the signed-in Windows user under `%LOCALAPPDATA%\\CodexUsageTray`, creates a Start Menu shortcut with the matching two-bar tray icon, replaces an older running copy, and launches the tray icon.
 
 ## Build
 

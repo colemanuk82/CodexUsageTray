@@ -11,8 +11,8 @@ InsideCompressed=1
 CAB_FixedSize=0
 CAB_ResvCodeSigning=0
 RebootMode=I
-TargetName=C:\Users\colem\Desktop\tech\CodexUsageTray\release-assets\CodexUsageTray-v2.0.7-Setup.exe
-FriendlyName=Codex Usage Tray v2.0.7 Setup
+TargetName=C:\Users\colem\Desktop\tech\CodexUsageTray\release-assets\CodexUsageTray-v2.0.8-Setup.exe
+FriendlyName=Codex Usage Tray v2.0.8 Setup
 AppLaunched=installer.cmd
 PostInstallCmd=<None>
 SourceFiles=SourceFiles
@@ -27,9 +27,10 @@ SourceFiles1=C:\Users\colem\Desktop\tech\CodexUsageTray
 %FILE2%=
 %FILE3%=
 %FILE4%=
+%FILE5%=
 
 [SourceFiles1]
-%FILE5%=installer.cmd
+%FILE6%=installer.cmd
 
 [Strings]
 FILE0=CodexUsageTray.deps.json
@@ -37,4 +38,5 @@ FILE1=CodexUsageTray.dll
 FILE2=CodexUsageTray.exe
 FILE3=CodexUsageTray.pdb
 FILE4=CodexUsageTray.runtimeconfig.json
-FILE5=installer.cmd
+FILE5=CodexUsageTray.ico
+FILE6=installer.cmd
