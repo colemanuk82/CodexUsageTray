@@ -127,7 +127,7 @@ internal static class Brushes
 
 internal sealed class TrayContext : ApplicationContext
 {
-    private static readonly Version CurrentVersion = new(2, 0, 15);
+    private static readonly Version CurrentVersion = new(2, 0, 16);
     private readonly NotifyIcon tray;
     private readonly UsageClient client = new();
     private readonly ResetDataClient resetClient = new();
@@ -761,7 +761,7 @@ internal sealed class GraphForm : Form
         header.Controls.Add(new Label { Text = "Codex limits", AutoSize = true, Location = new Point(34, 14), Font = new Font("Segoe UI", 32, FontStyle.Bold, GraphicsUnit.Pixel), ForeColor = Color.White });
         resetChanceValue = new Label { AutoSize = true, Location = new Point(36, 60), Font = new Font("Segoe UI", 23, FontStyle.Bold, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(255, 190, 70) }; header.Controls.Add(resetChanceValue);
         resetChance48Value = new Label { AutoSize = true, Location = new Point(245, 60), Font = new Font("Segoe UI", 23, FontStyle.Bold, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(255, 225, 120) }; header.Controls.Add(resetChance48Value);
-        lastResetValue = new Label { AutoSize = true, Location = new Point(500, 60), Font = new Font("Segoe UI", 19, FontStyle.Regular, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(190, 190, 200) }; header.Controls.Add(lastResetValue);
+        lastResetValue = new Label { AutoSize = true, Location = new Point(500, 58), Font = new Font("Segoe UI", 23, FontStyle.Bold, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(220, 220, 230) }; header.Controls.Add(lastResetValue);
         header.Controls.Add(new Label { Text = "WEEKLY CAPACITY", Tag = "muted", AutoSize = true, Location = new Point(36, 104), Font = new Font("Segoe UI", 18, FontStyle.Regular, GraphicsUnit.Pixel), ForeColor = Color.LightSteelBlue });
         weeklyValue = MetricLabel("", Color.LightSteelBlue); weeklyValue.Location = new Point(36, 135); header.Controls.Add(weeklyValue);
         var weeklyTrack = new Panel { Location = new Point(36, 183), Size = new Size(688, 20), BackColor = Color.FromArgb(25, 55, 32) }; weeklyTrack.Tag = "track"; weeklyTrack.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top; weeklyBar = new Panel { Tag = "weekly", Location = new Point(0, 0), Height = 20, BackColor = Color.FromArgb(55, 225, 95) }; weeklyTrack.Controls.Add(weeklyBar); header.Controls.Add(weeklyTrack);
