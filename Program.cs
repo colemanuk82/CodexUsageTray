@@ -127,7 +127,7 @@ internal static class Brushes
 
 internal sealed class TrayContext : ApplicationContext
 {
-    private static readonly Version CurrentVersion = new(2, 0, 11);
+    private static readonly Version CurrentVersion = new(2, 0, 12);
     private readonly NotifyIcon tray;
     private readonly UsageClient client = new();
     private readonly ResetDataClient resetClient = new();
@@ -603,7 +603,16 @@ internal sealed class AnalyticsForm : Form
     public void PlaceAboveTray(Point anchor) => UiIcons.PlaceAboveTray(this, anchor);
 }
 
-internal sealed class ResetData { public int ChancePercent { get; set; } public int ApiChancePercent { get; set; } public DateTimeOffset FetchedAt { get; set; } public List<ResetEvent> Events { get; set; } = []; }
+internal sealed class ResetData
+{
+    public int ChancePercent { get; set; }
+    public int ApiChancePercent { get; set; }
+    public DateTimeOffset FetchedAt { get; set; }
+    public DateTimeOffset ForecastValidUntil { get; set; }
+    public string ForecastSource { get; set; } = "Reset Beacon";
+    public string ForecastState { get; set; } = "unavailable";
+    public List<ResetEvent> Events { get; set; } = [];
+}
 internal sealed class ResetEvent { [JsonPropertyName("reset_type")] public string ResetType { get; set; } = "regular"; [JsonPropertyName("announced_at")] public DateTimeOffset AnnouncedAt { get; set; } }
 internal sealed class ResetDataClient
 {
@@ -612,13 +621,40 @@ internal sealed class ResetDataClient
     private string CachePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexUsageTray", "reset-data.json");
     public async Task<ResetData?> GetAsync()
     {
-        var status = await http.GetFromJsonAsync<StatusEnvelope>("https://codex-reset.today/api/v1/status", json) ?? new StatusEnvelope();
+        var forecast = await GetForecastAsync();
         var history = await http.GetFromJsonAsync<HistoryEnvelope>("https://codex-reset.today/api/v1/resets?limit=100&order=desc", json) ?? new HistoryEnvelope();
-        var apiChance = Math.Clamp(status.Data?.NextResetEstimate?.ChancePercent ?? 0, 0, 100);
         var events = history.Data ?? [];
         var historyChance = EstimateHistoricalChance(events);
-        var result = new ResetData { ChancePercent = Math.Max(apiChance, historyChance), ApiChancePercent = apiChance, FetchedAt = DateTimeOffset.UtcNow, Events = events };
+        var apiChance = UsableForecast(forecast) ? Math.Clamp(forecast!.Probabilities!.H48!.Display, 0, 100) : -1;
+        var chance = apiChance >= 0 ? apiChance : historyChance;
+        var result = new ResetData
+        {
+            ChancePercent = chance,
+            ApiChancePercent = apiChance,
+            FetchedAt = DateTimeOffset.UtcNow,
+            ForecastValidUntil = forecast?.ValidUntil ?? DateTimeOffset.MinValue,
+            ForecastSource = apiChance >= 0 ? "Reset Beacon" : "Local reset history",
+            ForecastState = forecast?.PublicationState ?? "unavailable",
+            Events = events
+        };
         Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!); File.WriteAllText(CachePath, JsonSerializer.Serialize(result, json)); return result;
+    }
+    private static async Task<ResetBeaconForecast?> GetForecastAsync()
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://resetbeacon.com/api/forecast");
+            request.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true };
+            using var response = await http.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadFromJsonAsync<ResetBeaconForecast>(json);
+        }
+        catch { return null; }
+    }
+    private static bool UsableForecast(ResetBeaconForecast? forecast)
+    {
+        if (forecast == null || forecast.Probabilities?.H48 == null || forecast.ValidUntil <= DateTimeOffset.UtcNow) return false;
+        return !string.Equals(forecast.PublicationState, "stale", StringComparison.OrdinalIgnoreCase);
     }
     private static int EstimateHistoricalChance(List<ResetEvent> events)
     {
@@ -636,16 +672,22 @@ internal sealed class ResetDataClient
         {
             var data = JsonSerializer.Deserialize<ResetData>(File.ReadAllText(CachePath), json);
             if (data == null) return null;
-            if (data.ApiChancePercent == 0 && data.ChancePercent > 0) data.ApiChancePercent = data.ChancePercent;
-            data.ChancePercent = Math.Max(data.ApiChancePercent, EstimateHistoricalChance(data.Events));
+            var forecastStillValid = data.ApiChancePercent >= 0 && data.ForecastValidUntil > DateTimeOffset.UtcNow;
+            data.ChancePercent = forecastStillValid ? data.ApiChancePercent : EstimateHistoricalChance(data.Events);
+            if (!forecastStillValid) { data.ApiChancePercent = -1; data.ForecastSource = "Local reset history"; data.ForecastState = "unavailable"; }
             return data;
         }
         catch { return null; }
     }
-    private sealed class StatusEnvelope { public StatusData? Data { get; set; } }
-    private sealed class StatusData { [JsonPropertyName("next_reset_estimate")] public Forecast? NextResetEstimate { get; set; } }
-    private sealed class Forecast { [JsonPropertyName("chance_percent")] public int ChancePercent { get; set; } }
     private sealed class HistoryEnvelope { public List<ResetEvent>? Data { get; set; } }
+    private sealed class ResetBeaconForecast
+    {
+        public string? PublicationState { get; set; }
+        public DateTimeOffset ValidUntil { get; set; }
+        public ResetBeaconProbabilities? Probabilities { get; set; }
+    }
+    private sealed class ResetBeaconProbabilities { public ResetBeaconProbability? H48 { get; set; } }
+    private sealed class ResetBeaconProbability { public int Display { get; set; } }
 }
 
 internal static class UiIcons

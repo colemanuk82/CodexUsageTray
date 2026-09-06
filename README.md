@@ -92,7 +92,7 @@ Session analytics are calculated locally. The app does not upload local session 
 | Public model-pricing pages | Periodic pricing updates for cost estimates |
 | GitHub | Release checks and update links |
 
-Reset information comes from the public [Codex Reset Today API](https://codex-reset.today/developers) and is cached locally. Model pricing uses built-in fallback rates and a periodically refreshed local cache. Unavailable model rates are labelled in the interface.
+Reset likelihood comes from the public [Reset Beacon forecast API](https://resetbeacon.com/api/docs/), which publishes separate 24-hour and 48-hour probabilities with a freshness window. Historical reset markers come from the public [Codex Reset Today API](https://codex-reset.today/developers) and are cached locally. Model pricing uses built-in fallback rates and a periodically refreshed local cache. Unavailable model rates are labelled in the interface.
 
 ## Build from source
 
@@ -129,6 +129,6 @@ bin\Release\net8.0-windows\win-x64\publish\CodexUsageTray.exe
 
 ## License and acknowledgements
 
-Released under the [MIT License](LICENSE). Reset data is provided by [Codex Reset Today](https://codex-reset.today/).
+Released under the [MIT License](LICENSE). Reset likelihood is provided by [Reset Beacon](https://resetbeacon.com/); historical reset markers are provided by [Codex Reset Today](https://codex-reset.today/).
 
 This independent project is not affiliated with or endorsed by OpenAI. Official account usage remains authoritative; reset probabilities and API cost estimates are not guarantees or billing data.
