@@ -127,7 +127,7 @@ internal static class Brushes
 
 internal sealed class TrayContext : ApplicationContext
 {
-    private static readonly Version CurrentVersion = new(2, 0, 9);
+    private static readonly Version CurrentVersion = new(2, 0, 10);
     private readonly NotifyIcon tray;
     private readonly UsageClient client = new();
     private readonly ResetDataClient resetClient = new();
@@ -653,7 +653,7 @@ internal static class UiIcons
     }
     public static Button CreateSwapButton()
     {
-        var button = new Button { Text = "View limits", Size = new Size(150, 34), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(55, 46, 16), ForeColor = SwitchColor, Font = new Font("Segoe UI", 10f, FontStyle.Bold), UseCompatibleTextRendering = true, Cursor = Cursors.Hand };
+        var button = new Button { Text = "Swap", Size = new Size(144, 34), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(55, 46, 16), ForeColor = SwitchColor, Font = new Font("Segoe UI", 14, FontStyle.Bold, GraphicsUnit.Pixel), UseCompatibleTextRendering = true, Cursor = Cursors.Hand };
         button.FlatAppearance.BorderColor = SwitchColor;
         button.FlatAppearance.BorderSize = 1;
         return button;
@@ -698,7 +698,7 @@ internal sealed class GraphForm : Form
         var footer = new Panel { Dock = DockStyle.Bottom, Height = 112, BackColor = Color.Black };
         refreshValue = new Label { AutoSize = true, Location = new Point(36, 14), Font = new Font("Segoe UI", 13, FontStyle.Regular, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(45, 155, 255) }; footer.Controls.Add(refreshValue);
         graphValue = new Label { AutoSize = true, Location = new Point(440, 14), Font = new Font("Segoe UI", 13, FontStyle.Regular, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(45, 155, 255) }; footer.Controls.Add(graphValue);
-        var analyticsValue = new Button { Text = "Swap", Size = new Size(144, 34), Location = new Point((footer.Width - 144) / 2, 70), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(55, 46, 16), ForeColor = UiIcons.SwitchColor, Font = new Font("Segoe UI", 14, FontStyle.Bold, GraphicsUnit.Pixel), UseCompatibleTextRendering = true, Cursor = Cursors.Hand }; analyticsValue.FlatAppearance.BorderColor = UiIcons.SwitchColor; analyticsValue.FlatAppearance.BorderSize = 1; footer.Resize += (_, _) => analyticsValue.Left = (footer.Width - analyticsValue.Width) / 2; analyticsValue.Click += (_, _) => { Close(); showAnalytics(); }; new ToolTip().SetToolTip(analyticsValue, "Switch between limits and usage"); footer.Controls.Add(analyticsValue); analyticsValue.BringToFront();
+        var analyticsValue = UiIcons.CreateSwapButton(); analyticsValue.Location = new Point((footer.Width - analyticsValue.Width) / 2, 70); footer.Resize += (_, _) => analyticsValue.Left = (footer.Width - analyticsValue.Width) / 2; analyticsValue.Click += (_, _) => { Close(); showAnalytics(); }; new ToolTip().SetToolTip(analyticsValue, "Switch between limits and usage"); footer.Controls.Add(analyticsValue); analyticsValue.BringToFront();
         refreshValue.Cursor = Cursors.Hand; graphValue.Cursor = Cursors.Hand;
         refreshValue.Click += (_, _) => refreshChanged(selectedRefreshMinutes == 1 ? 5 : 1);
         graphValue.Click += (_, _) => durationChanged(selectedGraphDays == 1 ? 7 : selectedGraphDays == 7 ? 30 : 1);

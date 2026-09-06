@@ -62,7 +62,7 @@ internal sealed class AnalyticsDashboard : Panel
         }
         Place(range, 24, 238, 130);
         Place(refresh, 164, 238, 155);
-        Place(limits, 225, LogicalHeight - 50, 150);
+        Place(limits, 228, LogicalHeight - 50, 144);
         Place(previous, 364, LogicalHeight - 50, 100);
         Place(next, 474, LogicalHeight - 50, 100);
         Invalidate();
