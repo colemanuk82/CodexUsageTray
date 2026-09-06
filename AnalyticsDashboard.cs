@@ -57,8 +57,8 @@ internal sealed class AnalyticsDashboard : Panel
         void Place(Button button, int x, int y, int width)
         {
             button.SetBounds((int)(x * LayoutScale), (int)(y * LayoutScale), (int)(width * LayoutScale), (int)(34 * LayoutScale));
-            if (Math.Abs(button.Font.Size - 14 * LayoutScale) > 0.01f || button.Font.Unit != GraphicsUnit.Pixel)
-                button.Font = new Font("Segoe UI", 14 * LayoutScale, FontStyle.Bold, GraphicsUnit.Pixel);
+            if (Math.Abs(button.Font.Size - 16 * LayoutScale) > 0.01f || button.Font.Unit != GraphicsUnit.Pixel)
+                button.Font = new Font("Segoe UI", 16 * LayoutScale, FontStyle.Bold, GraphicsUnit.Pixel);
         }
         Place(range, 24, 238, 130);
         Place(refresh, 164, 238, 155);
@@ -78,10 +78,10 @@ internal sealed class AnalyticsDashboard : Panel
         const int contentWidth = 600;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-        using var title = new Font("Segoe UI", 25, FontStyle.Bold, GraphicsUnit.Pixel);
-        using var number = new Font("Segoe UI", 24, FontStyle.Bold, GraphicsUnit.Pixel);
-        using var heading = new Font("Segoe UI", 17, FontStyle.Bold, GraphicsUnit.Pixel);
-        using var body = new Font("Segoe UI", 14, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var title = new Font("Segoe UI", 28, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var number = new Font("Segoe UI", 27, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var heading = new Font("Segoe UI", 19, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var body = new Font("Segoe UI", 16, FontStyle.Regular, GraphicsUnit.Pixel);
         using var text = new SolidBrush(theme.Text);
         using var muted = new SolidBrush(theme.Muted);
         using var surface = new SolidBrush(theme.Panel);
@@ -94,9 +94,9 @@ internal sealed class AnalyticsDashboard : Panel
         var cardWidth = (contentWidth - 60) / 2f;
         void Card(string caption, string value, float x, float y)
         {
-            g.FillRoundedRectangle(surface, x, y, cardWidth, 62, 10);
-            g.DrawString(caption, body, muted, x + 14, y + 7);
-            g.DrawString(value, number, text, x + 14, y + 25);
+            g.FillRoundedRectangle(surface, x, y, cardWidth, 70, 10);
+            g.DrawString(caption, body, muted, x + 14, y + 6);
+            g.DrawString(value, number, text, x + 14, y + 27);
         }
         Card("Total tokens", FormatTokens(total), 24, 88);
         Card("Calls / sessions", $"{FormatTokens(Records.Count)} / {Records.Select(x => x.SessionId).Distinct().Count():N0}", 36 + cardWidth, 88);
