@@ -127,7 +127,7 @@ internal static class Brushes
 
 internal sealed class TrayContext : ApplicationContext
 {
-    private static readonly Version CurrentVersion = new(2, 0, 14);
+    private static readonly Version CurrentVersion = new(2, 0, 15);
     private readonly NotifyIcon tray;
     private readonly UsageClient client = new();
     private readonly ResetDataClient resetClient = new();
@@ -606,6 +606,7 @@ internal sealed class AnalyticsForm : Form
 internal sealed class ResetData
 {
     public int ChancePercent { get; set; }
+    public int Chance24HourPercent { get; set; } = -1;
     public int ApiChancePercent { get; set; }
     public DateTimeOffset FetchedAt { get; set; }
     public DateTimeOffset ForecastValidUntil { get; set; }
@@ -625,15 +626,18 @@ internal sealed class ResetDataClient
         var history = await http.GetFromJsonAsync<HistoryEnvelope>("https://codex-reset.today/api/v1/resets?limit=100&order=desc", json) ?? new HistoryEnvelope();
         var events = history.Data ?? [];
         var historyChance = EstimateHistoricalChance(events);
-        var apiChance = UsableForecast(forecast) ? Math.Clamp(forecast!.Probabilities!.H48!.Display, 0, 100) : -1;
-        var chance = apiChance >= 0 ? apiChance : historyChance;
+        var apiChance24 = UsableForecast(forecast) ? Math.Clamp(forecast!.Probabilities!.H24!.Display, 0, 100) : -1;
+        var apiChance48 = UsableForecast(forecast) ? Math.Clamp(forecast!.Probabilities!.H48!.Display, 0, 100) : -1;
+        var chance24 = apiChance24 >= 0 ? apiChance24 : historyChance;
+        var chance48 = apiChance48 >= 0 ? apiChance48 : historyChance;
         var result = new ResetData
         {
-            ChancePercent = chance,
-            ApiChancePercent = apiChance,
+            ChancePercent = chance48,
+            Chance24HourPercent = chance24,
+            ApiChancePercent = apiChance48,
             FetchedAt = DateTimeOffset.UtcNow,
             ForecastValidUntil = forecast?.ValidUntil ?? DateTimeOffset.MinValue,
-            ForecastSource = apiChance >= 0 ? "Reset Beacon" : "Local reset history",
+            ForecastSource = apiChance48 >= 0 ? "Reset Beacon" : "Local reset history",
             ForecastState = forecast?.PublicationState ?? "unavailable",
             Events = events
         };
@@ -653,7 +657,7 @@ internal sealed class ResetDataClient
     }
     private static bool UsableForecast(ResetBeaconForecast? forecast)
     {
-        if (forecast == null || forecast.Probabilities?.H48 == null || forecast.ValidUntil <= DateTimeOffset.UtcNow) return false;
+        if (forecast == null || forecast.Probabilities?.H24 == null || forecast.Probabilities.H48 == null || forecast.ValidUntil <= DateTimeOffset.UtcNow) return false;
         return !string.Equals(forecast.PublicationState, "stale", StringComparison.OrdinalIgnoreCase);
     }
     private static int EstimateHistoricalChance(List<ResetEvent> events)
@@ -672,8 +676,10 @@ internal sealed class ResetDataClient
         {
             var data = JsonSerializer.Deserialize<ResetData>(File.ReadAllText(CachePath), json);
             if (data == null) return null;
+            if (data.Chance24HourPercent < 0) data.Chance24HourPercent = data.ChancePercent;
             var forecastStillValid = data.ApiChancePercent >= 0 && data.ForecastValidUntil > DateTimeOffset.UtcNow;
             data.ChancePercent = forecastStillValid ? data.ApiChancePercent : EstimateHistoricalChance(data.Events);
+            if (!forecastStillValid) data.Chance24HourPercent = EstimateHistoricalChance(data.Events);
             if (!forecastStillValid) { data.ApiChancePercent = -1; data.ForecastSource = "Local reset history"; data.ForecastState = "unavailable"; }
             return data;
         }
@@ -686,7 +692,7 @@ internal sealed class ResetDataClient
         public DateTimeOffset ValidUntil { get; set; }
         public ResetBeaconProbabilities? Probabilities { get; set; }
     }
-    private sealed class ResetBeaconProbabilities { public ResetBeaconProbability? H48 { get; set; } }
+    private sealed class ResetBeaconProbabilities { public ResetBeaconProbability? H24 { get; set; } public ResetBeaconProbability? H48 { get; set; } }
     private sealed class ResetBeaconProbability { public int Display { get; set; } }
 }
 
@@ -746,14 +752,15 @@ internal static class UiIcons
 
 internal sealed class GraphForm : Form
 {
-    private UsageSnapshot current; private List<UsageSnapshot> history; private readonly GraphCanvas canvas; private readonly Label weeklyValue; private readonly Label sessionValue; private readonly Panel weeklyBar; private readonly Panel sessionBar; private readonly Label sessionBarText; private readonly Label refreshValue; private readonly Label graphValue; private readonly Label resetChanceValue; private readonly Label lastResetValue; private readonly Action<int> refreshChanged; private readonly Action<int> durationChanged; private int selectedRefreshMinutes; private int selectedGraphDays; private float popoutScale = 1; private readonly Dictionary<Control, float> baseFontSizes = [];
+    private UsageSnapshot current; private List<UsageSnapshot> history; private readonly GraphCanvas canvas; private readonly Label weeklyValue; private readonly Label sessionValue; private readonly Panel weeklyBar; private readonly Panel sessionBar; private readonly Label sessionBarText; private readonly Label refreshValue; private readonly Label graphValue; private readonly Label resetChanceValue; private readonly Label resetChance48Value; private readonly Label lastResetValue; private readonly Action<int> refreshChanged; private readonly Action<int> durationChanged; private int selectedRefreshMinutes; private int selectedGraphDays; private float popoutScale = 1; private readonly Dictionary<Control, float> baseFontSizes = [];
     public GraphForm(UsageSnapshot current, List<UsageSnapshot> history, int refreshMinutes, int graphDays, Action<int> refreshChanged, Action<int> durationChanged, ResetData? resetData, Action showAnalytics)
     {
         this.current = current; this.history = history; this.refreshChanged = refreshChanged; this.durationChanged = durationChanged; selectedRefreshMinutes = refreshMinutes; selectedGraphDays = graphDays; Text = "Codex limits"; ClientSize = new Size(760, 740); MinimumSize = Size.Empty; StartPosition = FormStartPosition.Manual; FormBorderStyle = FormBorderStyle.None; AutoScaleMode = AutoScaleMode.None; KeyPreview = true; BackColor = Color.Black; ForeColor = Color.White; DoubleBuffered = true; KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) Close(); };
         var header = new Panel { Width = ClientSize.Width, Dock = DockStyle.Top, Height = 360, BackColor = Color.Black };
         header.Controls.Add(new Label { Text = "Codex limits", AutoSize = true, Location = new Point(34, 14), Font = new Font("Segoe UI", 32, FontStyle.Bold, GraphicsUnit.Pixel), ForeColor = Color.White });
-        resetChanceValue = new Label { AutoSize = true, Location = new Point(36, 60), Font = new Font("Segoe UI", 17, FontStyle.Bold, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(255, 190, 70) }; header.Controls.Add(resetChanceValue);
-        lastResetValue = new Label { AutoSize = true, Location = new Point(410, 60), Font = new Font("Segoe UI", 17, FontStyle.Regular, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(190, 190, 200) }; header.Controls.Add(lastResetValue);
+        resetChanceValue = new Label { AutoSize = true, Location = new Point(36, 60), Font = new Font("Segoe UI", 23, FontStyle.Bold, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(255, 190, 70) }; header.Controls.Add(resetChanceValue);
+        resetChance48Value = new Label { AutoSize = true, Location = new Point(245, 60), Font = new Font("Segoe UI", 23, FontStyle.Bold, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(255, 225, 120) }; header.Controls.Add(resetChance48Value);
+        lastResetValue = new Label { AutoSize = true, Location = new Point(500, 60), Font = new Font("Segoe UI", 19, FontStyle.Regular, GraphicsUnit.Pixel), ForeColor = Color.FromArgb(190, 190, 200) }; header.Controls.Add(lastResetValue);
         header.Controls.Add(new Label { Text = "WEEKLY CAPACITY", Tag = "muted", AutoSize = true, Location = new Point(36, 104), Font = new Font("Segoe UI", 18, FontStyle.Regular, GraphicsUnit.Pixel), ForeColor = Color.LightSteelBlue });
         weeklyValue = MetricLabel("", Color.LightSteelBlue); weeklyValue.Location = new Point(36, 135); header.Controls.Add(weeklyValue);
         var weeklyTrack = new Panel { Location = new Point(36, 183), Size = new Size(688, 20), BackColor = Color.FromArgb(25, 55, 32) }; weeklyTrack.Tag = "track"; weeklyTrack.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top; weeklyBar = new Panel { Tag = "weekly", Location = new Point(0, 0), Height = 20, BackColor = Color.FromArgb(55, 225, 95) }; weeklyTrack.Controls.Add(weeklyBar); header.Controls.Add(weeklyTrack);
@@ -814,7 +821,7 @@ internal sealed class GraphForm : Form
         ShowInTaskbar = false;
         base.SetVisibleCore(value);
     }
-    public void SetResetData(ResetData? data) { resetChanceValue.Text = data == null ? "Reset chance: unavailable" : $"Next reset chance: {data.ChancePercent}% (48h)"; var latest = data?.Events.OrderByDescending(x => x.AnnouncedAt).FirstOrDefault(); lastResetValue.Text = latest == null ? "Last reset: unavailable" : $"Days since last reset: {Math.Max(0, (DateTimeOffset.UtcNow - latest.AnnouncedAt).TotalDays):0.0}"; canvas.ResetEvents = data?.Events ?? []; canvas.Invalidate(); }
+    public void SetResetData(ResetData? data) { resetChanceValue.Text = data == null ? "24h: unavailable" : $"24h: {data.Chance24HourPercent}%"; resetChance48Value.Text = data == null ? "48h: unavailable" : $"48h: {data.ChancePercent}%"; var latest = data?.Events.OrderByDescending(x => x.AnnouncedAt).FirstOrDefault(); lastResetValue.Text = latest == null ? "Last reset: unavailable" : $"Last reset: {Math.Max(0, (DateTimeOffset.UtcNow - latest.AnnouncedAt).TotalDays):0.0} days ago"; canvas.ResetEvents = data?.Events ?? []; canvas.Invalidate(); }
     private Label MetricLabel(string name, Color color)
     {
         return new Label { Text = $"{(name == "Weekly" ? current.WeeklyRemaining : current.SessionRemaining):0}% remaining", AutoSize = true, Font = new Font("Segoe UI", 25, FontStyle.Bold, GraphicsUnit.Pixel), ForeColor = color };
