@@ -14,8 +14,48 @@ internal static class Program
     [STAThread]
     static void Main()
     {
-        ApplicationConfiguration.Initialize();
-        Application.Run(new TrayContext());
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, args) => AppLog.Write("UI thread", args.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            AppLog.Write("AppDomain", args.ExceptionObject as Exception ?? new Exception(args.ExceptionObject?.ToString() ?? "Unknown unhandled exception"));
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            AppLog.Write("Unobserved task", args.Exception);
+            args.SetObserved();
+        };
+
+        try
+        {
+            ApplicationConfiguration.Initialize();
+            Application.Run(new TrayContext());
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("Application startup", ex);
+        }
+    }
+}
+
+internal static class AppLog
+{
+    private static readonly object Sync = new();
+    private static readonly string DirectoryPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexUsageTray");
+    private static readonly string FilePath = Path.Combine(DirectoryPath, "crash.log");
+
+    public static void Write(string source, Exception exception)
+    {
+        try
+        {
+            lock (Sync)
+            {
+                Directory.CreateDirectory(DirectoryPath);
+                File.AppendAllText(FilePath, $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}] {source}{Environment.NewLine}{exception}{Environment.NewLine}{Environment.NewLine}");
+            }
+        }
+        catch
+        {
+            // Logging must never become a second failure path.
+        }
     }
 }
 
@@ -103,7 +143,11 @@ internal sealed class TrayContext : ApplicationContext
         graphDays = LoadGraphDays();
         ThemeManager.Load();
         resetData = resetClient.LoadCached();
-        if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("CodexUsageTray") is string) SetStartup(true);
+        try
+        {
+            if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("CodexUsageTray") is string) SetStartup(true);
+        }
+        catch (Exception ex) { AppLog.Write("Startup registration", ex); }
         tray = new NotifyIcon { Visible = true, Text = "Codex usage", Icon = MakeIcon(null) };
         tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) TogglePopout(); };
         tray.ContextMenuStrip = Menu();
@@ -181,14 +225,18 @@ internal sealed class TrayContext : ApplicationContext
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
     }
     private void SetRefreshMinutes(int minutes) { refreshMinutes = minutes; refreshTimer.Interval = minutes * 60 * 1000; graph?.SetOptions(refreshMinutes, graphDays); analytics?.SetRefreshMinutes(refreshMinutes); }
-    private void SetGraphDays(int days) { graphDays = days; SaveGraphDays(); graph?.SetOptions(refreshMinutes, graphDays); analytics?.SetGraphDays(graphDays); }
+    private void SetGraphDays(int days) { graphDays = days; try { SaveGraphDays(); } catch (Exception ex) { AppLog.Write("Save graph settings", ex); } graph?.SetOptions(refreshMinutes, graphDays); analytics?.SetGraphDays(graphDays); }
     private void SetTheme(ThemePalette theme)
     {
-        ThemeManager.Set(theme);
-        UpdateIcon();
-        if (graph != null && !graph.IsDisposed) ThemeManager.ApplyTo(graph);
-        if (analytics != null && !analytics.IsDisposed) ThemeManager.ApplyTo(analytics);
-        tray.ContextMenuStrip = Menu();
+        try
+        {
+            ThemeManager.Set(theme);
+            UpdateIcon();
+            if (graph != null && !graph.IsDisposed) ThemeManager.ApplyTo(graph);
+            if (analytics != null && !analytics.IsDisposed) ThemeManager.ApplyTo(analytics);
+            tray.ContextMenuStrip = Menu();
+        }
+        catch (Exception ex) { AppLog.Write("Theme change", ex); }
     }
     private async Task CheckForUpdatesAsync(bool notifyWhenCurrent)
     {
@@ -368,9 +416,37 @@ internal sealed class CodexAnalyticsStore
     private readonly string sessionsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "sessions"); private readonly string cachePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexUsageTray", "analytics-cache.json");
     public List<CodexUsageRecord> Load()
     {
-        var cache = ReadCache(); if (!Directory.Exists(sessionsPath)) return cache.Records; var files = Directory.EnumerateFiles(sessionsPath, "*.jsonl", SearchOption.AllDirectories).ToList(); var active = files.ToHashSet(StringComparer.OrdinalIgnoreCase); cache.Records.RemoveAll(x => !active.Contains(x.SourceFile));
-        foreach (var file in files) { var stamp = File.GetLastWriteTimeUtc(file).Ticks; if (cache.Files.TryGetValue(file, out var old) && old == stamp) continue; cache.Records.RemoveAll(x => string.Equals(x.SourceFile, file, StringComparison.OrdinalIgnoreCase)); try { cache.Records.AddRange(ParseFile(file)); cache.Files[file] = stamp; } catch (IOException) { } catch (UnauthorizedAccessException) { } }
-        Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!); File.WriteAllText(cachePath, JsonSerializer.Serialize(cache)); return cache.Records;
+        var cache = ReadCache();
+        if (!Directory.Exists(sessionsPath)) return cache.Records;
+
+        List<string> files;
+        try { files = Directory.EnumerateFiles(sessionsPath, "*.jsonl", SearchOption.AllDirectories).ToList(); }
+        catch (Exception ex) { AppLog.Write("Enumerate Codex sessions", ex); return cache.Records; }
+
+        var active = files.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        cache.Records.RemoveAll(x => !active.Contains(x.SourceFile));
+        foreach (var file in files)
+        {
+            try
+            {
+                var stamp = File.GetLastWriteTimeUtc(file).Ticks;
+                if (cache.Files.TryGetValue(file, out var old) && old == stamp) continue;
+                cache.Records.RemoveAll(x => string.Equals(x.SourceFile, file, StringComparison.OrdinalIgnoreCase));
+                cache.Records.AddRange(ParseFile(file));
+                cache.Files[file] = stamp;
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            catch (Exception ex) { AppLog.Write("Read Codex session", ex); }
+        }
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
+            File.WriteAllText(cachePath, JsonSerializer.Serialize(cache));
+        }
+        catch (Exception ex) { AppLog.Write("Write analytics cache", ex); }
+        return cache.Records;
     }
     private AnalyticsCache ReadCache() { try { var cache = JsonSerializer.Deserialize<AnalyticsCache>(File.ReadAllText(cachePath)) ?? new AnalyticsCache(); return cache.Version == 3 ? cache : new AnalyticsCache(); } catch { return new AnalyticsCache(); } }
     private static List<CodexUsageRecord> ParseFile(string file)
@@ -474,7 +550,20 @@ internal sealed class AnalyticsForm : Form
         ShowInTaskbar = false;
         base.SetVisibleCore(value);
     }
-    private async Task RefreshAsync() { if (refreshing) return; try { refreshing = true; all = store.Load(); await ModelCostEstimator.SyncAsync(all.Select(x => x.Model)); ResizeForModels(); Render(); } finally { refreshing = false; } }
+    private async Task RefreshAsync()
+    {
+        if (refreshing) return;
+        try
+        {
+            refreshing = true;
+            all = store.Load();
+            await ModelCostEstimator.SyncAsync(all.Select(x => x.Model));
+            ResizeForModels();
+            Render();
+        }
+        catch (Exception ex) { AppLog.Write("Analytics refresh", ex); }
+        finally { refreshing = false; }
+    }
     private void ResizeForModels() { var modelCount = all.Select(x => ModelCostEstimator.DisplayModel(x.Model)).Distinct(StringComparer.OrdinalIgnoreCase).Count(); var rows = Math.Max(1, (int)Math.Ceiling(modelCount / 2d)); var desiredHeight = 1646 + (rows - 1) * 218; if (Height == desiredHeight) return; Height = desiredHeight; PlaceAboveTray(); }
     private (DateTime Start, int Days) PeriodWindow() => (DateTime.Today.AddDays(-graphDays + 1), graphDays);
     private void Render() { var window = PeriodWindow(); dashboard.Records = all.Where(x => x.At.ToLocalTime().Date >= window.Start && x.At.ToLocalTime().Date < window.Start.AddDays(window.Days)).ToList(); dashboard.Days = window.Days; dashboard.RefreshMinutes = refreshMinutes; dashboard.StartDate = window.Start; dashboard.Invalidate(); }
