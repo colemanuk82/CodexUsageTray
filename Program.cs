@@ -127,7 +127,7 @@ internal static class Brushes
 
 internal sealed class TrayContext : ApplicationContext
 {
-    private static readonly Version CurrentVersion = new(2, 0, 16);
+    private static readonly Version CurrentVersion = new(2, 0, 17);
     private readonly NotifyIcon tray;
     private readonly UsageClient client = new();
     private readonly ResetDataClient resetClient = new();
@@ -508,7 +508,7 @@ internal static class ModelCostEstimator
     private static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(15) };
     private static Dictionary<string, ModelRate> rates = Defaults();
     private static string CachePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexUsageTray", "model-rates.json");
-    private static Dictionary<string, ModelRate> Defaults() => new(StringComparer.OrdinalIgnoreCase) { ["gpt-5.6-luna"] = new() { Input = .20m, Cached = .02m, Output = 1.20m }, ["gpt-5.6-terra"] = new() { Input = 2m, Cached = .20m, Output = 12m }, ["gpt-5.6-sol"] = new() { Input = 4m, Cached = .40m, Output = 20m }, ["gpt-5.6"] = new() { Input = 4m, Cached = .40m, Output = 20m }, ["codex-auto-review"] = new() { Input = .20m, Cached = .02m, Output = 1.20m } };
+    private static Dictionary<string, ModelRate> Defaults() => new(StringComparer.OrdinalIgnoreCase) { ["gpt-6-astra"] = new() { Input = 10m, Cached = 1m, Output = 50m }, ["gpt-5.6-luna"] = new() { Input = .20m, Cached = .02m, Output = 1.20m }, ["gpt-5.6-terra"] = new() { Input = 2m, Cached = .20m, Output = 12m }, ["gpt-5.6-sol"] = new() { Input = 4m, Cached = .40m, Output = 20m }, ["gpt-5.6"] = new() { Input = 4m, Cached = .40m, Output = 20m }, ["codex-auto-review"] = new() { Input = .20m, Cached = .02m, Output = 1.20m } };
     public static async Task SyncAsync(IEnumerable<string> models)
     {
         try
@@ -519,7 +519,7 @@ internal static class ModelCostEstimator
             foreach (var model in models.Where(x => x.StartsWith("gpt-", StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 var html = await http.GetStringAsync($"https://developers.openai.com/api/docs/models/{model}");
-                var match = Regex.Match(html, @"Input</div><div[^>]*>\$(?<input>[\d.]+)</div></div><div[^>]*><div>Cached input</div><div[^>]*>\$(?<cached>[\d.]+)</div></div><div[^>]*><div>Output</div><div[^>]*>\$(?<output>[\d.]+)</div>", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+                var match = Regex.Match(html, @"Input</div><div[^>]*>\$(?<input>[\d.]+)</div></div><div[^>]*><div>Cached input</div><div[^>]*>\$(?<cached>[\d.]+)</div></div>(?:<div[^>]*><div>Cache writes</div><div[^>]*>\$[\d.]+</div></div>)?<div[^>]*><div>Output</div><div[^>]*>\$(?<output>[\d.]+)</div>", RegexOptions.Singleline | RegexOptions.IgnoreCase);
                 if (match.Success) rates[model] = new ModelRate { Input = decimal.Parse(match.Groups["input"].Value, System.Globalization.CultureInfo.InvariantCulture), Cached = decimal.Parse(match.Groups["cached"].Value, System.Globalization.CultureInfo.InvariantCulture), Output = decimal.Parse(match.Groups["output"].Value, System.Globalization.CultureInfo.InvariantCulture) };
             }
             Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!); File.WriteAllText(CachePath, JsonSerializer.Serialize(new ModelRateCache { FetchedAt = DateTimeOffset.UtcNow, Rates = rates }));
@@ -529,7 +529,7 @@ internal static class ModelCostEstimator
     public static ModelRate? Rates(string model) => rates.TryGetValue(model, out var rate) ? rate : null;
     public static decimal Estimate(IEnumerable<CodexUsageRecord> records) { var list = records.ToList(); if (list.Count == 0 || Rates(list[0].Model) is not { } rate) return 0; var input = Math.Max(0, list.Sum(x => x.InputTokens) - list.Sum(x => x.CachedInputTokens)); var cached = list.Sum(x => x.CachedInputTokens); var output = list.Sum(x => x.OutputTokens) + list.Sum(x => x.ReasoningTokens); return input / 1_000_000m * rate.Input + cached / 1_000_000m * rate.Cached + output / 1_000_000m * rate.Output; }
     public static string DisplayModel(string model) => model.Equals("codex-auto-review", StringComparison.OrdinalIgnoreCase) ? "gpt-5.6-luna" : model;
-    public static Color ColorFor(string model) => model.ToLowerInvariant() switch { "gpt-5.6-luna" => Color.FromArgb(45, 155, 255), "gpt-5.6-terra" => Color.FromArgb(255, 165, 55), "gpt-5.6-sol" or "gpt-5.6" => Color.FromArgb(180, 95, 255), "codex-auto-review" => Color.FromArgb(45, 225, 185), _ => Color.FromArgb(120, 135, 150) };
+    public static Color ColorFor(string model) => model.ToLowerInvariant() switch { "gpt-6-astra" => Color.FromArgb(240, 100, 145), "gpt-5.6-luna" => Color.FromArgb(45, 155, 255), "gpt-5.6-terra" => Color.FromArgb(255, 165, 55), "gpt-5.6-sol" or "gpt-5.6" => Color.FromArgb(180, 95, 255), "codex-auto-review" => Color.FromArgb(45, 225, 185), _ => Color.FromArgb(120, 135, 150) };
 }
 internal sealed class AnalyticsBreakdownPanel : Panel
 {

@@ -92,7 +92,7 @@ Session analytics are calculated locally. The app does not upload local session 
 | Public model-pricing pages | Periodic pricing updates for cost estimates |
 | GitHub | Release checks and update links |
 
-Reset likelihood comes from the public [Reset Beacon forecast API](https://resetbeacon.com/api/docs/), which publishes separate 24-hour and 48-hour probabilities with a freshness window. Historical reset markers come from the public [Codex Reset Today API](https://codex-reset.today/developers) and are cached locally. Model pricing uses built-in fallback rates and a periodically refreshed local cache. Unavailable model rates are labelled in the interface.
+Reset likelihood comes from the public [Reset Beacon forecast API](https://resetbeacon.com/api/docs/), which publishes separate 24-hour and 48-hour probabilities with a freshness window. Historical reset markers come from the public [Codex Reset Today API](https://codex-reset.today/developers) and are cached locally. Model pricing uses built-in fallback rates and a periodically refreshed local cache. Unavailable model rates are labelled in the interface. GPT-6 Astra includes fallback rates of $10 input, $1 cached input, and $50 output per million tokens, verified against the [official model pricing](https://developers.openai.com/api/docs/models/gpt-6-astra). Estimates use standard token rates and do not account for service-tier multipliers, long-context surcharges, or cache-write pricing.
 
 ## Build from source
 
