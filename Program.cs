@@ -127,7 +127,7 @@ internal static class Brushes
 
 internal sealed class TrayContext : ApplicationContext
 {
-    private static readonly Version CurrentVersion = new(2, 0, 17);
+    private static readonly Version CurrentVersion = new(2, 0, 18);
     private readonly NotifyIcon tray;
     private readonly UsageClient client = new();
     private readonly ResetDataClient resetClient = new();
@@ -502,7 +502,7 @@ internal sealed class AnalyticsChart : Panel
     { base.OnPaint(e); e.Graphics.Clear(BackColor); var left = 90; var top = 76; var right = Math.Max(left + 100, Width - 38); var bottom = Math.Max(top + 100, Height - 62); var start = StartDate.Date; var daily = Enumerable.Range(0, Days).Select(i => Records.Where(x => x.At.ToLocalTime().Date == start.AddDays(i)).Sum(x => x.TotalTokens)).ToList(); var max = Math.Max(1, daily.Max()); using var grid = new Pen(Color.FromArgb(50, 55, 62)); using var text = new SolidBrush(Color.FromArgb(180, 190, 205)); using var font = new Font("Segoe UI", 18, FontStyle.Regular, GraphicsUnit.Pixel); for (var i = 0; i <= 4; i++) { var y = top + i * (bottom - top) / 4; e.Graphics.DrawLine(grid, left, y, right, y); e.Graphics.DrawString($"{max * (4 - i) / 4 / 1000000d:0.#}M", font, text, 22, y - 10); } using var barBrush = new SolidBrush(ThemeManager.Current.Good); var slot = (right - left) / (float)Math.Max(1, Days); for (var i = 0; i < daily.Count; i++) { var h = (float)(daily[i] / max * (bottom - top)); e.Graphics.FillRectangle(barBrush, left + i * slot + 2, bottom - h, Math.Max(3, slot - 5), h); } using var heading = new Font("Segoe UI", 32, FontStyle.Bold, GraphicsUnit.Pixel); e.Graphics.DrawString("Daily Codex usage", heading, Brushes.White, 34, 22); e.Graphics.DrawString(start.ToString("dd MMM"), font, text, left, bottom + 14); var endLabel = (start.AddDays(Days - 1)).ToString("dd MMM"); var endSize = e.Graphics.MeasureString(endLabel, font); e.Graphics.DrawString(endLabel, font, text, right - endSize.Width, bottom + 14); }
 }
 internal sealed class ModelRate { public decimal Input { get; set; } public decimal Cached { get; set; } public decimal Output { get; set; } }
-internal sealed class ModelRateCache { public DateTimeOffset FetchedAt { get; set; } public Dictionary<string, ModelRate> Rates { get; set; } = []; }
+internal sealed class ModelRateCache { public int SchemaVersion { get; set; } public DateTimeOffset FetchedAt { get; set; } public Dictionary<string, ModelRate> Rates { get; set; } = []; }
 internal static class ModelCostEstimator
 {
     private static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(15) };
@@ -514,19 +514,56 @@ internal static class ModelCostEstimator
         try
         {
             ModelRateCache cache; try { cache = JsonSerializer.Deserialize<ModelRateCache>(File.ReadAllText(CachePath)) ?? new(); } catch { cache = new(); }
-            rates = Defaults(); foreach (var entry in cache.Rates) rates[entry.Key] = entry.Value;
-            if (DateTimeOffset.UtcNow - cache.FetchedAt < TimeSpan.FromHours(24)) return;
-            foreach (var model in models.Where(x => x.StartsWith("gpt-", StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase))
+            rates = Defaults(); foreach (var entry in cache.Rates ?? []) rates[entry.Key] = entry.Value;
+            var requested = models.Select(NormalizeModel).Where(IsFetchableModel).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (requested.Count == 0) return;
+            var cacheIsFresh = cache.SchemaVersion >= 2 && DateTimeOffset.UtcNow - cache.FetchedAt < TimeSpan.FromHours(24);
+            var toFetch = cacheIsFresh ? requested.Where(x => !(cache.Rates?.ContainsKey(x) ?? false)).ToList() : requested;
+            if (toFetch.Count == 0) return;
+            var fetchedAny = false;
+            foreach (var model in toFetch)
             {
-                var html = await http.GetStringAsync($"https://developers.openai.com/api/docs/models/{model}");
-                var match = Regex.Match(html, @"Input</div><div[^>]*>\$(?<input>[\d.]+)</div></div><div[^>]*><div>Cached input</div><div[^>]*>\$(?<cached>[\d.]+)</div></div>(?:<div[^>]*><div>Cache writes</div><div[^>]*>\$[\d.]+</div></div>)?<div[^>]*><div>Output</div><div[^>]*>\$(?<output>[\d.]+)</div>", RegexOptions.Singleline | RegexOptions.IgnoreCase);
-                if (match.Success) rates[model] = new ModelRate { Input = decimal.Parse(match.Groups["input"].Value, System.Globalization.CultureInfo.InvariantCulture), Cached = decimal.Parse(match.Groups["cached"].Value, System.Globalization.CultureInfo.InvariantCulture), Output = decimal.Parse(match.Groups["output"].Value, System.Globalization.CultureInfo.InvariantCulture) };
+                var rate = await FetchRateAsync(model);
+                if (rate == null) continue;
+                rates[model] = rate;
+                fetchedAny = true;
             }
-            Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!); File.WriteAllText(CachePath, JsonSerializer.Serialize(new ModelRateCache { FetchedAt = DateTimeOffset.UtcNow, Rates = rates }));
+            if (fetchedAny)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!);
+                File.WriteAllText(CachePath, JsonSerializer.Serialize(new ModelRateCache { SchemaVersion = 2, FetchedAt = DateTimeOffset.UtcNow, Rates = rates }));
+            }
         }
         catch { }
     }
-    public static ModelRate? Rates(string model) => rates.TryGetValue(model, out var rate) ? rate : null;
+    private static async Task<ModelRate?> FetchRateAsync(string model)
+    {
+        foreach (var candidate in ModelPageCandidates(model))
+        {
+            try
+            {
+                using var response = await http.GetAsync($"https://developers.openai.com/api/docs/models/{Uri.EscapeDataString(candidate)}");
+                if (!response.IsSuccessStatusCode) continue;
+                var html = await response.Content.ReadAsStringAsync();
+                var match = Regex.Match(html, @"<div[^>]*>\s*Input\s*</div>\s*<div[^>]*>\s*\$(?<input>[\d.]+)\s*</div>.*?<div[^>]*>\s*Cached input\s*</div>\s*<div[^>]*>\s*\$(?<cached>[\d.]+)\s*</div>.*?<div[^>]*>\s*Output\s*</div>\s*<div[^>]*>\s*\$(?<output>[\d.]+)\s*</div>", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+                if (!match.Success) continue;
+                var culture = System.Globalization.CultureInfo.InvariantCulture;
+                if (decimal.TryParse(match.Groups["input"].Value, System.Globalization.NumberStyles.Number, culture, out var input) && decimal.TryParse(match.Groups["cached"].Value, System.Globalization.NumberStyles.Number, culture, out var cached) && decimal.TryParse(match.Groups["output"].Value, System.Globalization.NumberStyles.Number, culture, out var output)) return new ModelRate { Input = input, Cached = cached, Output = output };
+            }
+            catch { }
+        }
+        return null;
+    }
+    private static IEnumerable<string> ModelPageCandidates(string model)
+    {
+        yield return model;
+        var withoutSnapshot = Regex.Replace(model, @"-\d{4}(?:-\d{2}){0,2}$", "", RegexOptions.IgnoreCase);
+        if (!withoutSnapshot.Equals(model, StringComparison.OrdinalIgnoreCase)) yield return withoutSnapshot;
+        if (model.EndsWith("-latest", StringComparison.OrdinalIgnoreCase)) yield return model[..^7];
+    }
+    private static string NormalizeModel(string model) => model.Equals("codex-auto-review", StringComparison.OrdinalIgnoreCase) ? "gpt-5.6-luna" : model.Trim();
+    private static bool IsFetchableModel(string model) => model.Length > 0 && !model.Equals("Codex (unknown)", StringComparison.OrdinalIgnoreCase) && !model.Any(char.IsWhiteSpace);
+    public static ModelRate? Rates(string model) => rates.TryGetValue(model, out var rate) ? rate : rates.TryGetValue(NormalizeModel(model), out rate) ? rate : null;
     public static decimal Estimate(IEnumerable<CodexUsageRecord> records) { var list = records.ToList(); if (list.Count == 0 || Rates(list[0].Model) is not { } rate) return 0; var input = Math.Max(0, list.Sum(x => x.InputTokens) - list.Sum(x => x.CachedInputTokens)); var cached = list.Sum(x => x.CachedInputTokens); var output = list.Sum(x => x.OutputTokens) + list.Sum(x => x.ReasoningTokens); return input / 1_000_000m * rate.Input + cached / 1_000_000m * rate.Cached + output / 1_000_000m * rate.Output; }
     public static string DisplayModel(string model) => model.Equals("codex-auto-review", StringComparison.OrdinalIgnoreCase) ? "gpt-5.6-luna" : model;
     public static Color ColorFor(string model) => model.ToLowerInvariant() switch { "gpt-6-astra" => Color.FromArgb(240, 100, 145), "gpt-5.6-luna" => Color.FromArgb(45, 155, 255), "gpt-5.6-terra" => Color.FromArgb(255, 165, 55), "gpt-5.6-sol" or "gpt-5.6" => Color.FromArgb(180, 95, 255), "codex-auto-review" => Color.FromArgb(45, 225, 185), _ => Color.FromArgb(120, 135, 150) };
@@ -864,15 +901,25 @@ internal sealed class GraphCanvas : Panel
     private int hoverX = -1;
     private double? hoverValue;
     private DateTimeOffset? hoverTime;
-    public GraphCanvas() { BackColor = Color.FromArgb(24, 25, 29); DoubleBuffered = true; Padding = new Padding(24); MouseMove += UpdateHover; MouseLeave += (_, _) => { hoverX = -1; hoverValue = null; hoverTime = null; Invalidate(); }; }
+    private ResetEvent? hoverReset;
+    public GraphCanvas() { BackColor = Color.FromArgb(24, 25, 29); DoubleBuffered = true; Padding = new Padding(24); MouseMove += UpdateHover; MouseLeave += (_, _) => { hoverX = -1; hoverValue = null; hoverTime = null; hoverReset = null; Invalidate(); }; }
     private void UpdateHover(object? sender, MouseEventArgs e)
     {
         var plot = new Rectangle(120, 100, Math.Max(100, (int)(Width / LayoutScale) - 180), Math.Max(100, (int)(Height / LayoutScale) - 170));
         var mouseX = e.X / LayoutScale; var mouseY = e.Y / LayoutScale;
-        if (mouseX < plot.Left || mouseX > plot.Right || mouseY < plot.Top || mouseY > plot.Bottom) { hoverX = -1; hoverValue = null; hoverTime = null; Invalidate(); return; }
+        if (mouseX < plot.Left || mouseX > plot.Right || mouseY < plot.Top || mouseY > plot.Bottom) { hoverX = -1; hoverValue = null; hoverTime = null; hoverReset = null; Invalidate(); return; }
+        var rangeStart = DateTimeOffset.UtcNow.AddDays(-RangeDays);
+        var reset = ResetEvents.Where(x => x.AnnouncedAt >= rangeStart && x.AnnouncedAt <= DateTimeOffset.UtcNow)
+            .Select(x => new { Event = x, X = plot.Left + (x.AnnouncedAt - rangeStart).TotalDays / RangeDays * plot.Width })
+            .OrderBy(x => Math.Abs(x.X - mouseX)).FirstOrDefault();
+        if (reset != null && Math.Abs(reset.X - mouseX) <= 8)
+        {
+            hoverX = (int)Math.Clamp(reset.X, plot.Left, plot.Right); hoverValue = null; hoverTime = null; hoverReset = reset.Event; Invalidate(); return;
+        }
+        hoverReset = null;
         var points = VisiblePoints();
         if (points.Count == 0) return;
-        var rangeStart = DateTimeOffset.UtcNow.AddDays(-RangeDays); var point = points.OrderBy(x => Math.Abs((plot.Left + (x.At - rangeStart).TotalDays / RangeDays * plot.Width) - mouseX)).First();
+        var point = points.OrderBy(x => Math.Abs((plot.Left + (x.At - rangeStart).TotalDays / RangeDays * plot.Width) - mouseX)).First();
         hoverX = (int)Math.Clamp(plot.Left + (point.At - rangeStart).TotalDays / RangeDays * plot.Width, plot.Left, plot.Right); hoverValue = point.WeeklyRemaining; hoverTime = point.At; Invalidate();
     }
     protected override void OnPaint(PaintEventArgs e)
@@ -881,7 +928,12 @@ internal sealed class GraphCanvas : Panel
         for (int i = 0; i <= 4; i++) { var y = plot.Top + i * plot.Height / 4; e.Graphics.DrawLine(grid, plot.Left, y, plot.Right, y); e.Graphics.DrawString($"{100 - i * 25}%", font, text, 18, y - 8); }
         using var heading = new Font("Segoe UI", 18, FontStyle.Bold, GraphicsUnit.Pixel); e.Graphics.DrawString("Remaining usage", heading, Brushes.White, 34, 20); if (RangeDays == 1) { for (var i = 0; i <= 4; i++) { var x = plot.Left + i * plot.Width / 4f; e.Graphics.DrawLine(grid, x, plot.Top, x, plot.Bottom); var label = DateTimeOffset.UtcNow.AddHours(-24 + i * 6).ToLocalTime().ToString("HH:mm"); var labelSize = e.Graphics.MeasureString(label, font); e.Graphics.DrawString(label, font, text, x - labelSize.Width / 2, plot.Bottom + 12); } } else { e.Graphics.DrawString($"{RangeDays} day{(RangeDays == 1 ? "" : "s")} ago", font, text, plot.Left, plot.Bottom + 12); var todaySize = e.Graphics.MeasureString("Today", font); e.Graphics.DrawString("Today", font, text, plot.Right - todaySize.Width, plot.Bottom + 12); }
         var rangeStart = DateTimeOffset.UtcNow.AddDays(-RangeDays);
-        foreach (var reset in ResetEvents.Where(x => x.AnnouncedAt >= rangeStart && x.AnnouncedAt <= DateTimeOffset.UtcNow)) { var x = plot.Left + (float)((reset.AnnouncedAt - rangeStart).TotalDays / RangeDays) * plot.Width; using var resetPen = new Pen(reset.ResetType.Equals("banked", StringComparison.OrdinalIgnoreCase) ? Color.SaddleBrown : Color.DeepSkyBlue, 2); e.Graphics.DrawLine(resetPen, x, plot.Top, x, plot.Bottom); }
+        var visibleResets = ResetEvents.Where(x => x.AnnouncedAt >= rangeStart && x.AnnouncedAt <= DateTimeOffset.UtcNow).ToList();
+        foreach (var reset in visibleResets) { var x = plot.Left + (float)((reset.AnnouncedAt - rangeStart).TotalDays / RangeDays) * plot.Width; using var resetPen = new Pen(reset.ResetType.Equals("banked", StringComparison.OrdinalIgnoreCase) ? Color.SaddleBrown : Color.DeepSkyBlue, reset == hoverReset ? 4 : 2); e.Graphics.DrawLine(resetPen, x, plot.Top, x, plot.Bottom); }
+        if (hoverReset != null)
+        {
+            using var hoverFont = new Font("Segoe UI", 16, FontStyle.Regular, GraphicsUnit.Pixel); var resetKind = hoverReset.ResetType.Equals("banked", StringComparison.OrdinalIgnoreCase) ? "Banked reset" : "Reset"; var label = $"{resetKind}  •  {hoverReset.AnnouncedAt.ToLocalTime():dd MMM yyyy HH:mm}"; var size = e.Graphics.MeasureString(label, hoverFont); var badge = new RectangleF(plot.Right - size.Width - 18, 16, size.Width + 14, size.Height + 8); using var badgeBackground = new SolidBrush(ThemeManager.Current.Panel); using var badgeBorder = new Pen(Color.DeepSkyBlue, 1); e.Graphics.FillRectangle(badgeBackground, badge); e.Graphics.DrawRectangle(badgeBorder, badge.X, badge.Y, badge.Width, badge.Height); using var labelBrush = new SolidBrush(Color.DeepSkyBlue); e.Graphics.DrawString(label, hoverFont, labelBrush, badge.X + 7, badge.Y + 4);
+        }
         var points = VisiblePoints();
         if (points.Count < 2) { using var empty = new SolidBrush(ThemeManager.Current.Muted); var msg = "Weekly history is collecting — check back after a few refreshes."; var size = e.Graphics.MeasureString(msg, font); e.Graphics.DrawString(msg, font, empty, plot.Left + (plot.Width - size.Width) / 2, plot.Top + plot.Height / 2 - 10); return; }
         var usageRangeStart = DateTimeOffset.UtcNow.AddDays(-RangeDays);
